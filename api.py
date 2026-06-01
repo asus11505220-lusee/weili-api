@@ -1,10 +1,22 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware  # 👉 1. 新增這行：載入 CORS 套件
 from datetime import datetime
 # 匯入你原本的運算引擎 (檔名必須是 weili_v8_engine.py)
 import weili_v8_engine as engine 
 
 # 建立 FastAPI 應用程式
 app = FastAPI(title="生肖威力生碼器 API")
+
+# 👉 2. 新增這整段：對全世界發放通行證
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ... (下面維持你原本寫好的路由跟邏輯) ...
 
 # 建立一個路由 (當 APP 呼叫 /generate 網址時，就會執行這個函數)
 @app.get("/generate")
