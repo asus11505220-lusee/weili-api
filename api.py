@@ -8,15 +8,15 @@ import gichier539_engine
 
 app = FastAPI(title="生肖威力今彩 API (加密防護版)")
 
-# 🔒 你的防小人金鑰 (可以自己亂敲改成更複雜的)
+# 🔒 你的防小人金鑰
 API_KEY = "Fortune2026-SuperKey"
 api_key_header = APIKeyHeader(name="X-API-KEY", auto_error=False)
 
-# 開放 Thunkable 跨域連線
+# 🛑 關鍵修正：allow_credentials 必須為 False，否則與 ["*"] 衝突會導致伺服器直接死當！
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False, 
     allow_methods=["*"],
     allow_headers=["*"],
 )
