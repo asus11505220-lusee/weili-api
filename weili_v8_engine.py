@@ -153,7 +153,7 @@ def build_advanced_stats(history_wl, bonds_539):
     return pair_count, triplet_count, z1_z2_pair_count, p5_counter, p10_counter, p15_counter, p20_counter, single_freq
 
 # ================= 🧪 第一區：V18 化學軌域引擎（歷史黑名單+近期衰減+三元核心固定）=================
-def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=36, history_wl=None):
+def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=4, history_wl=None):
     
     # 🎯【核心修正 1】：鎖定隨機亂數種子，保證相同資料產出相同結果
     if history_wl:
@@ -392,7 +392,7 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
             T = 120.0; T_min = 0.5
             alpha = (T_min / T) ** (1.0 / 3000)
 
-            for step in range(3000):
+            for step in range(400):
                 T *= alpha
                 g1_idx, g2_idx = random.sample(range(12), 2)
                 e1_idx = random.randint(0, len(groups[g1_idx])-1)
@@ -672,7 +672,7 @@ def main():
         pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(work_wl, bonds_539)
         
         print('\n⚙️ 啟動 V33 霸王引擎 (單期驗證：啟動 100x 深度蒙地卡羅爆破)...')
-        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=36, history_wl=work_wl)
+        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=4, history_wl=work_wl)
         zone2_ordered, z2_scores = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, work_wl)
         _, resonance, wave_log = wave_zone2_predict(work_wl)
         print('\n🌊 第二區聲波干涉分析報告')
@@ -703,7 +703,7 @@ def main():
         top_539_singles, bonds_539 = get_539_chemical_bonds(history_539, ref_date)
         pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(work_wl, bonds_539)
         print('\n⚙️ 啟動 V22 引擎 (預測未來：100x 深度蒙地卡羅爆破)...')
-        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=36, history_wl=work_wl)
+        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=4, history_wl=work_wl)
         zone2_ordered, z2_scores = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, work_wl)
         _, resonance, wave_log = wave_zone2_predict(work_wl)
         print('\n🌊 第二區聲波干涉分析報告')
@@ -746,7 +746,7 @@ def main():
             top_539_singles, bonds_539 = get_539_chemical_bonds(history_539, ref_date)
             pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(work_wl, bonds_539)
             
-            zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=36, history_wl=work_wl)
+            zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=4, history_wl=work_wl)
             zone2_ordered, _ = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, work_wl)
             
             period_max_z1 = 0
@@ -814,7 +814,7 @@ def get_prediction(zodiac_id: int):
         # 精準對接原始程式碼的「多維時間窗」與「聲波干涉」連鎖函數
         top_539_singles, bonds_539 = get_539_chemical_bonds(history_539, ref_date)
         pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(history_wl, bonds_539)
-        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=36, history_wl=history_wl)
+        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=4, history_wl=history_wl)
         zone2_ordered, z2_scores = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, history_wl)
 
         # 根據生肖分配 12 組號碼
