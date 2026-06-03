@@ -774,3 +774,48 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# =================================================================
+# 👇 以下為 API 雲端接孔 (Cloud API Entry Point) 👇
+# =================================================================
+def get_prediction(zodiac_id: int):
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(base_dir, WEILI_CSV)
+        
+        # 讀取威力彩歷史資料
+        data = load_csv(csv_path) 
+        if not data:
+            return {"status": "error", "message": "威力彩 CSV 讀取失敗或無資料"}
+
+        history_wl = data[:]
+        
+        # 威力彩 V25 化學軌域引擎需要讀取 539 資料作為鍵結參考
+        c539_path = os.path.join(base_dir, C539_CSV)
+        history_539 = load_csv(c539_path)
+        
+        ref_date = history_wl[-1]['date_obj'] if history_wl else datetime.now()
+
+        # 精準對接原始程式碼的「多維時間窗」與「聲波干涉」連鎖函數
+        top_539_singles, bonds_539 = get_539_chemical_bonds(history_539, ref_date)
+        pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(history_wl, bonds_539)
+        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=36, history_wl=history_wl)
+        zone2_ordered, z2_scores = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, history_wl)
+
+        # 根據生肖分配 12 組號碼
+        chosen_idx = (zodiac_id - 1) % len(zone1_combos)
+        chosen_zone1 = list(zone1_combos[chosen_idx]['combo'])
+        chosen_zone2 = zone2_ordered[chosen_idx]
+        
+        # 安全轉型，避免字串相加錯誤導致 API 崩潰
+        next_issue = str(int(data[-1]['draw']) + 1)
+        
+        return {
+            "status": "success",
+            "type": "weili",
+            "issue_number": next_issue,
+            "zone1": chosen_zone1,
+            "zone2": chosen_zone2
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"威力彩引擎發生錯誤: {str(e)}"}
