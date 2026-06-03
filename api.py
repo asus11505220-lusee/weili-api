@@ -2,21 +2,21 @@ from fastapi import FastAPI, HTTPException, Security, status
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 
-# 載入兩支神級引擎
+# 載入你剛剛寫好接孔的兩支神級引擎
 import weili_v8_engine
 import gichier539_engine
 
 app = FastAPI(title="生肖威力今彩 API (加密防護版)")
 
-# 🔒 你的防小人金鑰
+# 🔒 你的防小人金鑰 (可以自己亂敲改成更複雜的)
 API_KEY = "Fortune2026-SuperKey"
 api_key_header = APIKeyHeader(name="X-API-KEY", auto_error=False)
 
-# 🛑 關鍵修正：allow_credentials 改為 False，避免與 ["*"] 衝突導致伺服器死當
+# 開放 Thunkable 跨域連線
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False, 
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -1015,10 +1015,14 @@ if __name__ == '__main__':
 # =================================================================
 # 👇 以下為 API 雲端接孔 (Cloud API Entry Point) 👇
 # =================================================================
+# =================================================================
+# 👇 以下為 API 雲端接孔 (Cloud API Entry Point) 👇
+# =================================================================
 def get_prediction(zodiac_id: int):
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         csv_path = os.path.join(base_dir, CSV_NAME)
+        
         # 呼叫你原本的 load_csv
         data, _ = load_csv(csv_path)
         if not data:
@@ -1028,16 +1032,23 @@ def get_prediction(zodiac_id: int):
         all_scored, pair_stats, triplet_stats = build_pool_v82(history)
         combos, _ = generate_combos_v83(all_scored, pair_stats, triplet_stats, history)
 
+        # 根據生肖挑選一組號碼
         chosen_idx = (zodiac_id - 1) % len(combos)
-        chosen_zone1 = list(combos[chosen_idx][0])
-        next_issue = str(data[-1]['draw'] + 1)
+        chosen_combo = list(combos[chosen_idx])
+        
+        # 抓取下一期期號
+        try:
+            next_issue_str = str(int(history[-1]['draw']) + 1)
+        except:
+            next_issue_str = "最新一期"
 
+        # 🛑 關鍵修正：確保欄位名稱叫做 zone1，且 zone2 設為 None (因為539沒有特別號)
         return {
             "status": "success",
             "type": "jincai539",
-            "issue_number": next_issue,
-            "zone1": chosen_zone1,
-            "zone2": ""
+            "issue_number": next_issue_str,
+            "zone1": chosen_combo,
+            "zone2": None 
         }
     except Exception as e:
-        return {"status": "error", "message": f"539引擎發生錯誤: {str(e)}"}
+        return {"status": "error", "message": f"今彩539引擎發生錯誤: {str(e)}"}

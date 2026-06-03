@@ -29,6 +29,7 @@ def parse_date(date_str):
     except:
         return datetime.min
 
+# 🔴 核心修改：彈性讀取 CSV 資料，相容 539 與威力彩，略過無效或缺漏的欄位
 def load_csv(filename):
     if not os.path.exists(filename): return []
     last_err = None
@@ -38,22 +39,35 @@ def load_csv(filename):
                 rows = list(csv.DictReader(f))
             normalized = []
             for r in rows:
-                period = str(r.get('期別', r.get('period', ''))).strip()
-                date_str = str(r.get('開獎日期', r.get('date', ''))).strip()
-                nums = []
-                # 🎯 防呆處理：無論是 539 (5顆) 還是 威力彩 (6顆)，都能安全讀取不報錯
-                for key in ['獎號1', '獎號2', '獎號3', '獎號4', '獎號5', '獎號6', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6']:
-                    if key in r and r[key].strip().isdigit():
-                        nums.append(int(r[key].strip()))
-                zone2 = None
-                for z2_key in ['第二區', '特別號', 'zone2']:
-                    if z2_key in r and r[z2_key].strip().isdigit():
-                        zone2 = int(r[z2_key].strip())
-                        break
-                if period and len(nums) > 0:
-                    data_row = {'draw': period, 'date_str': date_str, 'date_obj': parse_date(date_str), 'nums': sorted(nums)}
-                    if zone2 is not None: data_row['zone2'] = zone2
-                    normalized.append(data_row)
+                try:
+                    period = str(r.get('期別', r.get('period', ''))).strip()
+                    date_str = str(r.get('開獎日期', r.get('date', ''))).strip()
+                    nums = []
+                    
+                    # 彈性讀取 1~6 個號碼（抓不到或為空值就忽略，不會觸發 KeyError 或 ValueError）
+                    for key in ['獎號1', '獎號2', '獎號3', '獎號4', '獎號5', '獎號6', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6']:
+                        val = r.get(key, '').strip()
+                        if val.isdigit():
+                            nums.append(int(val))
+                            
+                    # 彈性讀取第二區（539 沒這個欄位就維持 None）
+                    zone2 = None
+                    for z2_key in ['第二區', '特別號', 'zone2']:
+                        z2_val = r.get(z2_key, '').strip()
+                        if z2_val.isdigit():
+                            zone2 = int(z2_val)
+                            break
+                            
+                    # 只要有抓到數字（無論是5個還是6個），就視為有效資料
+                    if period and len(nums) >= 5:
+                        data_row = {'draw': period, 'date_str': date_str, 'date_obj': parse_date(date_str), 'nums': sorted(nums)}
+                        if zone2 is not None: 
+                            data_row['zone2'] = zone2
+                        normalized.append(data_row)
+                except Exception:
+                    # 如果單行解析發生無法預期的錯誤，直接略過該行，不讓引擎崩潰
+                    continue
+                    
             if normalized: return normalized
         except Exception as e:
             last_err = e
@@ -121,41 +135,44 @@ def build_advanced_stats(history_wl, bonds_539):
     for (a, b), count in bonds_539.items():
         pair_count[(a, b)] += (count * 15.0)
 
+    # V17 強化：近5期出現2次以上的pair = 「超強共價鍵」×5 額外加成
     for pair, cnt in p5_counter.items():
         if cnt >= 2:
-            pair_count[pair] += cnt * 60.0
+            pair_count[pair] += cnt * 60.0   # 超強鍵能，讓退火強制聚合
 
+    # V17 強化：近10期出現的triplet加重（三元共振節點）
+    # 找 triplet 在 p10 中的共現次數
     trip10 = Counter()
     for row in (history_wl[-10:] if len(history_wl)>=10 else history_wl):
         for tri in combinations(row['nums'], 3):
             trip10[tuple(sorted(tri))] += 1
     for tri, cnt in trip10.items():
         if cnt >= 2:
-            triplet_count[tri] += cnt * 80.0
+            triplet_count[tri] += cnt * 80.0  # 近10期強三元組，大幅加成
 
     return pair_count, triplet_count, z1_z2_pair_count, p5_counter, p10_counter, p15_counter, p20_counter, single_freq
 
-# ================= 第一區：V18 化學軌域引擎 =================
+# ================= 🧪 第一區：V18 化學軌域引擎（歷史黑名單+近期衰減+三元核心固定）=================
 def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=36, history_wl=None):
     
+    # 🎯【核心修正 1】：鎖定隨機亂數種子，保證相同資料產出相同結果
     if history_wl:
-        # 確保亂數種子可以安全轉為整數
-        try:
-            seed_val = int(history_wl[-1]['draw'])
-        except:
-            seed_val = 42
-        random.seed(seed_val)
+        random.seed(history_wl[-1]['draw'])
     else:
-        random.seed(42)
+        random.seed(42) # Fallback
 
+    # 建立歷史開獎黑名單
     forbidden_set = set()
     if history_wl:
         for row in history_wl:
             forbidden_set.add(tuple(sorted(row['nums'])))
 
+    # ── Step1：先算 pair30/橋接節點（後面矩陣加成需要它）──
     pair30 = Counter()
     strong_pairs = []
     node_connections = Counter()
+    potential_trips = {}
+    top_trips = []
 
     if history_wl:
         for row in (history_wl[-30:] if len(history_wl)>=30 else history_wl):
@@ -167,15 +184,19 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
         node_connections[p[0]] += 1
         node_connections[p[1]] += 1
 
+    # 🎯【核心修正 2】：消除字典/集合排序隨機性，同分時比較數字大小
     sorted_nodes = sorted(node_connections.items(), key=lambda x: (-x[1], x[0]))
 
+    # ── Step2：pair矩陣：近30期衰減(50%) + 全歷史V13加權(50%) + 橋接加成 ──
     recent_pair_mat = [[0.0]*40 for _ in range(40)]
     if history_wl:
+        # 近30期衰減（50%）
         for age, row in enumerate(reversed(history_wl[-30:])):
             w = max(0, 30 - age) / 30.0
             for a, b in combinations(row['nums'], 2):
                 recent_pair_mat[a][b] += w * 5.0
                 recent_pair_mat[b][a] += w * 5.0
+        # 全歷史V13加權（50%）
         total_h = len(history_wl)
         for idx, row in enumerate(history_wl):
             ago = total_h - idx
@@ -183,6 +204,7 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
             for a, b in combinations(row['nums'], 2):
                 recent_pair_mat[a][b] += w * 0.5
                 recent_pair_mat[b][a] += w * 0.5
+        # 橋接節點加成
         if strong_pairs and node_connections:
             top_bridge_nodes = [n for n, _ in sorted_nodes[:5]]
             for p in strong_pairs:
@@ -191,6 +213,7 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
                     recent_pair_mat[a][b] += pair30[p] * 3.0
                     recent_pair_mat[b][a] += pair30[p] * 3.0
 
+    # 從橋接節點構建潛在三元組
     potential_trips = {}
     for n, _ in sorted_nodes[:10]:
         connected_nums = set()
@@ -206,8 +229,10 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
             if score > potential_trips.get(trip, 0):
                 potential_trips[trip] = score
 
+    # 取pair總分最高的前4個三元組作為骨架候選 (強制防綁定排序隨機性)
     top_trips = [t for t, _ in sorted(potential_trips.items(), key=lambda x: (-x[1], x[0]))[:4]]
 
+    # 若 pair延伸法找不到足夠的，退回近20期triplet計數法
     if len(top_trips) < 4:
         trip20 = Counter()
         if history_wl:
@@ -218,10 +243,11 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
         top_trips += [t for t, _ in sorted_trip20[:4] if t not in top_trips]
         top_trips = top_trips[:4]
 
+    # ── 熱度計算 ──
     hotness = {n: (single_freq[5][n]*4 + single_freq[10][n]*3 +
                    single_freq[15][n]*2 + single_freq[20][n]*1)
                for n in range(1, 39)}
-    
+    # 🎯【核心修正 3】：熱度平手時，以號碼大小決定先後順序
     ranked = sorted(hotness.keys(), key=lambda k: (hotness[k], k), reverse=True)
 
     HOT  = set(ranked[:10])
@@ -242,6 +268,7 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
     empty_orbital_charge = {n: s539_single.get(n,0)*2.5 - wl_recent10.get(n,0)*2.0
                             for n in range(1,39)}
 
+    # ── 矩陣預算（只用近30期衰減pair，不用全歷史）──
     pair_mat = recent_pair_mat
     trip_mat = [[[0.0]*40 for _ in range(40)] for _ in range(40)]
     for k, v in triplet_stats.items():
@@ -272,6 +299,7 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
         gaps = [sorted_g[i+1]-sorted_g[i] for i in range(len(sorted_g)-1)]
         variety = sum([any(gp<=3 for gp in gaps), any(4<=gp<=7 for gp in gaps), any(gp>7 for gp in gaps)])
         score += (variety-1)*40.0
+        # 歷史黑名單懲罰
         if tuple(sorted(g)) in forbidden_set:
             score -= 99999
         return score
@@ -292,12 +320,15 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
             if c>=2 and h>=1: cold_role+=1
             shell_cov.append(len(set(shell_of[ni] for ni in g)))
 
+        # ── V25 修正：依實際組數動態縮放閾值（原設計是8組）──
+        # 原8組設計：50%熱組/25%溫組/25%冷組/62.5%覆蓋4層
+        # 12組縮放：6/3/3/7  → 完整保留 V20 的比例邏輯
         n_g    = len(grps)
         ratio  = n_g / 8.0
-        t_hot  = max(2, int(4 * ratio))   
-        t_warm = max(1, int(2 * ratio))   
-        t_cold = max(1, int(2 * ratio))   
-        t_sh   = max(3, int(5 * ratio))   
+        t_hot  = max(2, int(4 * ratio))   # 8組→4, 12組→6
+        t_warm = max(1, int(2 * ratio))   # 8組→2, 12組→3
+        t_cold = max(1, int(2 * ratio))   # 8組→2, 12組→3
+        t_sh   = max(3, int(5 * ratio))   # 8組→5, 12組→7
 
         if hot_role  < t_hot : pen -= (t_hot  - hot_role ) * 500
         if warm_role < t_warm: pen -= (t_warm - warm_role) * 500
@@ -307,11 +338,18 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
         return pen
 
     pool = list(range(1, 39))
+    # 12組×6個 = 72個token
+    # pool = range(1,39) = 38個基底
+    # 還需要 72-38 = 34個補充
+    # 修正：避免 ranked[:15] 和 ranked[:10] 重複導致Top10出現3次
+    # 改為：Top12各加1份(12個) + Top12~25溫號各加1份(13個) + 最冷9個各1份(9個) = 34個
     fillers = ranked[:12] + ranked[12:25] + ranked[-9:]
     pool.extend(fillers)
+    # pool大小 = 38 + 12 + 13 + 9 = 72，剛好分12組×6個
 
     supreme_best_groups = None
     supreme_best_score  = -999999
+
     import math
 
     for _ in range(mc_runs):
@@ -320,6 +358,8 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
 
         for attempt in range(15):
             sets = [set() for _ in range(12)]
+
+            # ── 三元核心固定：第1~4組先植入強triplet ──
             for gi, core_tri in enumerate(top_trips[:4]):
                 for n in core_tri:
                     sets[gi].add(n)
@@ -330,6 +370,7 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
             for t in tokens:
                 available = [i for i in range(12) if len(sets[i])<6 and t not in sets[i]]
                 if not available:
+                    # 退化：放棄三元核心，全部重置
                     sets = [set() for _ in range(12)]
                     random.shuffle(tokens)
                     for t2 in tokens:
@@ -341,6 +382,7 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
 
             if not all(len(s)==6 for s in sets): continue
 
+            # 🎯【核心修正 4】：消除 Set 取值順序造成的雜湊隨機性
             groups = [sorted(list(s)) for s in sets]
             grp_scores  = [calc_group_chem(g) for g in groups]
             current_syn = sum(grp_scores)
@@ -389,6 +431,7 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
     if not supreme_best_groups:
         raise Exception("化學退火失敗，請重新執行程式。")
 
+    # 🎯【核心修正 5】：解決平分時因為記憶體位置不同的隨機亂流
     supreme_best_groups.sort(key=lambda g: (sum(hotness[n] for n in g), tuple(g)), reverse=True)
 
     final_sets = []
@@ -419,12 +462,14 @@ def wave_zone2_predict(history_wl, top_n=5):
     mean_val = z2_seq.mean()
     centered = z2_seq - mean_val
 
+    # ── 1. FFT 頻譜，找主頻 ──
     Z = fft(centered)
     freqs = fftfreq(N)
     power = np.abs(Z) ** 2
     pos_idx = np.where(freqs > 0)[0]
     top_idx = pos_idx[np.argsort(power[pos_idx])[::-1][:top_n]]
 
+    # ── 2. 相位干涉分析（近段 vs 中段）──
     seg = max(N // 3, 8)
     s_mid  = centered[seg: 2*seg]
     s_late = centered[2*seg:]
@@ -451,16 +496,19 @@ def wave_zone2_predict(history_wl, top_n=5):
             tag = '↔️  側向震盪'
         wave_log.append(f'  週期≈{period:.1f}期  相位差={np.degrees(dp):+.0f}°  {tag}')
 
+    # ── 3. 主頻波形延伸，預測 t=N（下一期）──
     pred_wave = mean_val
     for idx in top_idx:
         amp   = Z[idx] / N
         freq  = freqs[idx]
         pred_wave += (amp * np.exp(2j * np.pi * freq * N)).real * 2
 
+    # 干涉修正
     net_interference = constructive_boost - destructive_damp * 0.5
     pred_adjusted = pred_wave + net_interference * 0.3
     pred_clamped = float(np.clip(pred_adjusted, 1, 8))
 
+    # ── 4. 高斯共振分佈 + 冷門保底 ──
     sigma = 1.4
     raw_resonance = {}
     for target in range(1, 9):
@@ -501,27 +549,35 @@ def assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, history_wl):
     z2_options = list(range(1, 9))
     n_groups = len(zone1_combos)   
 
+    # ── Step 1：聲波共振排名 ──
     _, resonance, _ = wave_zone2_predict(history_wl)
+    # 🎯【核心修正 6】：平分時強制防亂流排序
     ranked_z2 = sorted(z2_options, key=lambda z: (resonance.get(z, 0), z), reverse=True)
 
+    # ── Step 2：依共振強度決定各號碼分配組數
+    # 修正：正確支援任意 n_groups，確保 slot_plan 長度 == n_groups
     slot_plan = []
     if n_groups <= 8:
+        # ≤8組：按原始邏輯，末名可能分不到
         base_slots = [2, 1, 1, 1, 1, 1, 1, 0]
         for i in range(8 - n_groups):
             base_slots[7 - i] = 0
     else:
-        base_slots = [1] * 8          
-        extra = n_groups - 8          
+        # >8組（如12組）：每個號碼至少1組，多出的名額按共振強度由高到低補
+        base_slots = [1] * 8          # 每個號碼先保1組
+        extra = n_groups - 8          # 多出的名額（12-8=4）
         for i in range(extra):
-            base_slots[i % 3] += 1   
+            base_slots[i % 3] += 1   # 排名前3的號碼輪流多拿
 
     for z2, slots in zip(ranked_z2, base_slots):
         for _ in range(slots):
             slot_plan.append(z2)
+    # 防呆：確保長度恰好等於 n_groups
     slot_plan = slot_plan[:n_groups]
     while len(slot_plan) < n_groups:
         slot_plan.append(ranked_z2[0])
 
+    # ── Step 3：計算每組對每個第二區的聯合鍵結分 ──
     bond_scores = []
     for combo_dict in zone1_combos:
         combo = combo_dict['combo']
@@ -623,6 +679,9 @@ def main():
         for line in wave_log: print(line)
         print('\n' + '=' * 95)
         print(f'🎯 威力彩 V25 (目標預測：第 {target_draw} 期)')
+        print('   - 🔒 [固定種子] 最後期號為seed，相同資料永遠產出相同組合（V21新增）')
+        print('   - ⚖️  [混合pair矩陣] 近30期50%+全歷史50%，底部風險分提升8倍（V20核心）')
+        print('   - 🔗 [確定性排序] 平手節點/三元組以數字大小決定，消除隨機漂移（V21新增）')
         print('=' * 95)
 
         for i, combo_dict in enumerate(zone1_combos):
@@ -651,6 +710,9 @@ def main():
         for line in wave_log: print(line)
         print('\n' + '=' * 95)
         print(f'🎯 威力彩 V25 (目標預測：未來的下一期)')
+        print('   - 🔒 [固定種子] 最後期號為seed，相同資料永遠產出相同組合（V21新增）')
+        print('   - ⚖️  [混合pair矩陣] 近30期50%+全歷史50%，底部風險分提升8倍（V20核心）')
+        print('   - 🔗 [確定性排序] 平手節點/三元組以數字大小決定，消除隨機漂移（V21新增）')
         print('=' * 95)
         for i, combo_dict in enumerate(zone1_combos):
             z1 = combo_dict['combo']
@@ -736,31 +798,32 @@ def get_prediction(zodiac_id: int):
         base_dir = os.path.dirname(os.path.abspath(__file__))
         csv_path = os.path.join(base_dir, WEILI_CSV)
         
+        # 讀取威力彩歷史資料
         data = load_csv(csv_path) 
         if not data:
             return {"status": "error", "message": "威力彩 CSV 讀取失敗或無資料"}
 
         history_wl = data[:]
         
+        # 威力彩 V25 化學軌域引擎需要讀取 539 資料作為鍵結參考
         c539_path = os.path.join(base_dir, C539_CSV)
         history_539 = load_csv(c539_path)
         
         ref_date = history_wl[-1]['date_obj'] if history_wl else datetime.now()
 
+        # 精準對接原始程式碼的「多維時間窗」與「聲波干涉」連鎖函數
         top_539_singles, bonds_539 = get_539_chemical_bonds(history_539, ref_date)
         pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(history_wl, bonds_539)
         zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=36, history_wl=history_wl)
         zone2_ordered, z2_scores = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, history_wl)
 
+        # 根據生肖分配 12 組號碼
         chosen_idx = (zodiac_id - 1) % len(zone1_combos)
         chosen_zone1 = list(zone1_combos[chosen_idx]['combo'])
         chosen_zone2 = zone2_ordered[chosen_idx]
         
-        # 🎯 防呆處理：確保期數可以正常加 1，就算格式錯誤也不會當機
-        try:
-            next_issue = str(int(data[-1]['draw']) + 1)
-        except:
-            next_issue = "最新一期"
+        # 安全轉型，避免字串相加錯誤導致 API 崩潰
+        next_issue = str(int(data[-1]['draw']) + 1)
         
         return {
             "status": "success",
