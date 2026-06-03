@@ -1034,7 +1034,7 @@ def get_prediction(zodiac_id: int):
 
         # 根據生肖挑選一組號碼
         chosen_idx = (zodiac_id - 1) % len(combos)
-        chosen_combo = list(combos[chosen_idx])
+        chosen_combo = list(combos[chosen_idx][0])  # 加 [0] 才是號碼本體
         
         # 抓取下一期期號
         try:

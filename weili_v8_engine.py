@@ -823,7 +823,7 @@ def get_prediction(zodiac_id: int):
         chosen_zone2 = zone2_ordered[chosen_idx]
         
         # 安全轉型，避免字串相加錯誤導致 API 崩潰
-        next_issue = str(int(data[-1]['draw']) + 1)
+        next_issue = str(int(str(data[-1]['draw']).strip()) + 1)
         
         return {
             "status": "success",
