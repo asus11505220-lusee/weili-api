@@ -31,30 +31,45 @@ COLORS = [
 RESET_COLOR = '\033[0m'
 
 def load_csv(filename):
+    import io
+    import csv
+    ENCODINGS = ['utf-8-sig', 'cp950', 'big5', 'utf-8']
     last_err = None
     for enc in ENCODINGS:
         try:
-            with open(filename, 'r', encoding=enc, newline='') as f:
-                rows = list(csv.DictReader(f))
+            with open(filename, 'rb') as f:
+                raw = f.read()
+            text = raw.decode(enc, errors='replace')
+            reader = csv.reader(io.StringIO(text))
+            all_rows = list(reader)
+            if len(all_rows) < 2:
+                continue
             normalized = []
-            for r in rows:
-                period = str(r.get('期別', '')).strip()
-                date = str(r.get('開獎日期', '')).strip()
-                nums = []
-                for key in ['獎號1', '獎號2', '獎號3', '獎號4', '獎號5']:
-                    val = str(r.get(key, '')).strip()
-                    if not val:
-                        nums = []
-                        break
-                    nums.append(int(val))
-                if period and date and len(nums) == 5:
-                    normalized.append({'draw': int(period), 'date': date, 'nums': sorted(nums)})
+            for row in all_rows[1:]:  # 跳過第一行標頭
+                try:
+                    if len(row) < 7:
+                        continue
+                    period = str(row[0]).strip()
+                    date = str(row[1]).strip()
+                    nums = []
+                    for i in range(2, 7):  # 欄位2~6是獎號1~5
+                        val = str(row[i]).strip()
+                        if val.isdigit():
+                            nums.append(int(val))
+                    if period and date and len(nums) == 5:
+                        normalized.append({
+                            'draw': int(period),
+                            'date': date,
+                            'nums': sorted(nums)
+                        })
+                except Exception:
+                    continue
             if normalized:
                 normalized.sort(key=lambda x: x['draw'])
                 return normalized, enc
         except Exception as e:
             last_err = e
-    raise Exception(f'CSV讀取失敗：{last_err}')
+    return [], None  # 找不到資料時安全回傳空值，不讓伺服器當機
 
 def missing_span(n, history):
     for i, row in enumerate(reversed(history), 1):
@@ -1015,18 +1030,15 @@ if __name__ == '__main__':
 # =================================================================
 # 👇 以下為 API 雲端接孔 (Cloud API Entry Point) 👇
 # =================================================================
-# =================================================================
-# 👇 以下為 API 雲端接孔 (Cloud API Entry Point) 👇
-# =================================================================
 def get_prediction(zodiac_id: int):
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         csv_path = os.path.join(base_dir, CSV_NAME)
-        
-        # 呼叫你原本的 load_csv
+
+        # 呼叫無敵防呆版 load_csv
         data, _ = load_csv(csv_path)
         if not data:
-            return {"status": "error", "message": "今彩539 CSV 讀取失敗"}
+            return {"status": "error", "message": "今彩539 CSV 讀取失敗或格式錯誤"}
 
         history = data[:]
         all_scored, pair_stats, triplet_stats = build_pool_v82(history)
@@ -1034,7 +1046,13 @@ def get_prediction(zodiac_id: int):
 
         # 根據生肖挑選一組號碼
         chosen_idx = (zodiac_id - 1) % len(combos)
-        chosen_combo = list(combos[chosen_idx][0])  # 加 [0] 才是號碼本體
+        
+        # 🛑 終極防呆：確保不管核心引擎吐出什麼結構，都能正確抓到 5 個號碼
+        raw_combo = combos[chosen_idx]
+        if isinstance(raw_combo, tuple) and len(raw_combo) == 2 and isinstance(raw_combo[0], (list, tuple)):
+            chosen_combo = list(raw_combo[0])
+        else:
+            chosen_combo = list(raw_combo)
         
         # 抓取下一期期號
         try:
@@ -1042,7 +1060,6 @@ def get_prediction(zodiac_id: int):
         except:
             next_issue_str = "最新一期"
 
-        # 🛑 關鍵修正：確保欄位名稱叫做 zone1，且 zone2 設為 None (因為539沒有特別號)
         return {
             "status": "success",
             "type": "jincai539",
