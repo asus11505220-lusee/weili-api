@@ -1047,12 +1047,15 @@ def get_prediction(zodiac_id: int):
         # 根據生肖挑選一組號碼
         chosen_idx = (zodiac_id - 1) % len(combos)
         
-        # 🛑 終極防呆：確保不管核心引擎吐出什麼結構，都能正確抓到 5 個號碼
+        # 🛑 終極防呆：正確解開大禮包，只取第一個元素（純號碼陣列）
         raw_combo = combos[chosen_idx]
-        if isinstance(raw_combo, tuple) and len(raw_combo) == 2 and isinstance(raw_combo[0], (list, tuple)):
+        if isinstance(raw_combo, tuple) and isinstance(raw_combo[0], (list, tuple)):
             chosen_combo = list(raw_combo[0])
         else:
             chosen_combo = list(raw_combo)
+            
+        # 洗淨資料：確保陣列裡面通通都是數字，並且只拿 5 顆球
+        chosen_combo = [int(x) for x in chosen_combo if str(x).isdigit()][:5]
         
         # 抓取下一期期號
         try:
