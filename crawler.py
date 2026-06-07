@@ -1,12 +1,13 @@
 import os
 import csv
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
 
 FILE_539 = '今彩539_歷史資料.csv'
+FILE_WEILI = '威力彩_歷史資料.csv'
 
 def get_latest_issue(filename):
+    """讀取 CSV 取得最後一期期數"""
     if not os.path.exists(filename):
         return "0"
     try:
@@ -16,45 +17,103 @@ def get_latest_issue(filename):
             if len(valid_rows) > 1:
                 return str(valid_rows[-1][0]).strip()
     except Exception:
-        return "0"
+        pass
     return "0"
 
-def run_real_crawler():
+def fetch_539():
     last_issue = get_latest_issue(FILE_539)
-    print(f"目前 CSV 最新期數為: {last_issue}")
+    print(f"▶️ [今彩539] 目前 CSV 最新期數: {last_issue}")
     
-    # 🌟 改用樂透雲，對海外 IP 極度友善
-    url = 'https://www.lotto-88.com/539.php'
+    # 呼叫台彩官方 API
+    today_month = datetime.now().strftime("%Y-%m")
+    url = f"https://api.taiwanlottery.com/TLCAPIWeB/Lottery/DailyCashResult?period&month={today_month}&pageNum=1&pageSize=50"
+    
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Origin': 'https://www.taiwanlottery.com',
+        'Referer': 'https://www.taiwanlottery.com/'
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=20)
-        response.encoding = 'utf-8'
-        soup = BeautifulSoup(response.text, 'html.parser')
+        res = requests.get(url, headers=headers, timeout=15)
+        data = res.json()
         
-        # 尋找最新的期數與號碼 (根據樂透雲結構)
-        # 這裡需要根據該網站實際呈現的標籤進行解析
-        # ⚠️ 註：網頁爬蟲需要根據最新網頁結構更新，如果這段失效，請告知網站變動
+        results = data.get("content", {}).get("dailyCashRes", [])
+        if not results:
+            print("❌ [今彩539] API 回傳無資料")
+            return
+            
+        latest_draw = results[0]
+        fetched_issue = str(latest_draw["period"])
         
-        # 假設我們已經解析到最新資料 (實際爬取邏輯依網頁結構而定)
-        fetched_issue = "115000138" # 需從 soup 解析出來
-        fetched_numbers = ['13', '27', '30', '37', '38'] # 需從 soup 解析出來
+        # 處理日期 (2026-06-06T00:00:00 -> 2026/06/06)
+        raw_date = latest_draw["lotteryDate"].split("T")[0]
+        fetched_date = raw_date.replace("-", "/")
         
-        if fetched_issue > last_issue:
-            today_str = datetime.now().strftime("%Y/%m/%d")
-            total_sum = sum(int(num) for num in fetched_numbers)
-            new_row = [fetched_issue, today_str] + fetched_numbers + [str(total_sum)]
+        # 處理號碼
+        nums = latest_draw["drawNumberSize"]
+        nums_str = [str(n) for n in nums]
+        
+        # 確認是新資料才寫入
+        if int(fetched_issue) > int(last_issue):
+            total_sum = sum(nums)
+            new_row = [fetched_issue, fetched_date] + nums_str + [str(total_sum)]
             
             with open(FILE_539, 'a', newline='', encoding='big5', errors='ignore') as f:
                 csv.writer(f).writerow(new_row)
-            print(f"✅ 成功抓取並寫入第 {fetched_issue} 期真實號碼！")
+            print(f"✅ [今彩539] 成功將第 {fetched_issue} 期真實號碼補進 CSV！")
         else:
-            print("目前網頁資料尚未更新，或已是最新。")
-
+            print("⏸️ [今彩539] 已是最新，無須更新。")
     except Exception as e:
-        print(f"連線爬蟲失敗: {e}")
+        print(f"❌ [今彩539] 發生重大錯誤: {e}")
+
+def fetch_weili():
+    last_issue = get_latest_issue(FILE_WEILI)
+    print(f"▶️ [威力彩] 目前 CSV 最新期數: {last_issue}")
+    
+    today_month = datetime.now().strftime("%Y-%m")
+    url = f"https://api.taiwanlottery.com/TLCAPIWeB/Lottery/SuperLotto638Result?period&month={today_month}&pageNum=1&pageSize=50"
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Origin': 'https://www.taiwanlottery.com',
+        'Referer': 'https://www.taiwanlottery.com/'
+    }
+    
+    try:
+        res = requests.get(url, headers=headers, timeout=15)
+        data = res.json()
+        
+        results = data.get("content", {}).get("superLotto638Res", [])
+        if not results:
+            print("❌ [威力彩] API 回傳無資料")
+            return
+            
+        latest_draw = results[0]
+        fetched_issue = str(latest_draw["period"])
+        
+        raw_date = latest_draw["lotteryDate"].split("T")[0]
+        fetched_date = raw_date.replace("-", "/")
+        
+        nums = latest_draw["drawNumberSize"]
+        second_sec = latest_draw.get("secondSection", "")
+        
+        nums_str = [str(n) for n in nums]
+        if second_sec:
+            nums_str.append(str(second_sec)) # 加入第二區號碼
+            
+        if int(fetched_issue) > int(last_issue):
+            new_row = [fetched_issue, fetched_date] + nums_str
+            
+            with open(FILE_WEILI, 'a', newline='', encoding='big5', errors='ignore') as f:
+                csv.writer(f).writerow(new_row)
+            print(f"✅ [威力彩] 成功將第 {fetched_issue} 期真實號碼補進 CSV！")
+        else:
+            print("⏸️ [威力彩] 已是最新，無須更新。")
+    except Exception as e:
+        print(f"❌ [威力彩] 發生重大錯誤: {e}")
 
 if __name__ == "__main__":
-    run_real_crawler()
+    fetch_539()
+    print("-" * 30)
+    fetch_weili()
