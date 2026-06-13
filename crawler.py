@@ -10,7 +10,7 @@ FILE_WEILI = '威力彩_歷史資料.csv'
 def get_latest_issue(filename):
     if not os.path.exists(filename): return "0"
     try:
-        with open(filename, 'r', encoding='big5', errors='ignore') as f:
+        with open(filename, 'r', encoding='utf-8-sig', errors='ignore') as f:
             reader = list(csv.reader(f))
             valid_rows = [row for row in reader if len(row) > 0]
             if len(valid_rows) > 1: return str(valid_rows[-1][0]).strip()
@@ -55,7 +55,7 @@ def fetch_from_pilio():
                 # 組合出你自創的格式：[期數, 日期, 球1, 球2, 球3, 球4, 球5, 總和]
                 row = [issue, date] + nums + [total_sum]
                 
-                with open(FILE_539, 'a', newline='', encoding='big5', errors='ignore') as f:
+                with open(FILE_539, 'a', newline='', encoding='utf-8-sig', errors='ignore') as f:
                     csv.writer(f).writerow(row)
                 print(f"✅ 成功補進 今彩539 第 {issue} 期")
                 last_issue_539 = issue
@@ -89,7 +89,7 @@ def fetch_from_pilio():
                 # 組合出你自創的格式：[期數, 日期, 球1, 球2, 球3, 球4, 球5, 球6, 第二區]
                 row = [issue, date] + nums
                 
-                with open(FILE_WEILI, 'a', newline='', encoding='big5', errors='ignore') as f:
+                with open(FILE_WEILI, 'a', newline='', encoding='utf-8-sig', errors='ignore') as f:
                     csv.writer(f).writerow(row)
                 print(f"✅ 成功補進 威力彩 第 {issue} 期")
                 last_issue_weili = issue
