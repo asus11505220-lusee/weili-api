@@ -28,12 +28,12 @@ jobs:
 
     - name: 4. 執行你的爬蟲主程式
       run: |
-        python debug_weili.py
-        
+        python crawler.py
+
     - name: 5. 將有變動的 CSV 存檔並上傳回 GitHub
       run: |
-        #git config --global user.name 'github-actions[bot]'
-        #git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        #git add *.csv
-        #git commit -m "🤖 自動更新彩券歷史資料" || echo "今天沒有新資料，無須更新"
-        #git push
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        git add *.csv
+        git commit -m "🤖 自動更新彩券歷史資料" || echo "今天沒有新資料，無須更新"
+        git push
