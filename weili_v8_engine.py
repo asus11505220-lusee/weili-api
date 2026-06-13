@@ -30,44 +30,53 @@ def parse_date(date_str):
         return datetime.min
 
 # 🔴 核心修改：彈性讀取 CSV 資料，相容 539 與威力彩，略過無效或缺漏的欄位
+# 採用「位置式」解析（不依賴 header 欄位名稱），避免 BOM / 編碼差異造成 DictReader key 比對失敗
 def load_csv(filename):
     if not os.path.exists(filename): return []
     last_err = None
     for enc in ENCODINGS:
         try:
             with open(filename, 'r', encoding=enc, newline='') as f:
-                rows = list(csv.DictReader(f))
+                rows = list(csv.reader(f))
+
             normalized = []
             for r in rows:
                 try:
-                    period = str(r.get('期別', r.get('period', ''))).strip()
-                    date_str = str(r.get('開獎日期', r.get('date', ''))).strip()
+                    if not r:
+                        continue
+                    # 去除每個欄位的前後空白與 BOM 殘留字元
+                    cells = [str(c).strip().lstrip('\ufeff') for c in r]
+
+                    period = cells[0]
+                    # 跳過 header 行（第一欄非純數字，例如「期別」）
+                    if not period.isdigit():
+                        continue
+
+                    date_str = cells[1] if len(cells) > 1 else ''
+
+                    # 第2欄之後依序嘗試取數字號碼，最多取6個
                     nums = []
-                    
-                    # 彈性讀取 1~6 個號碼（抓不到或為空值就忽略，不會觸發 KeyError 或 ValueError）
-                    for key in ['獎號1', '獎號2', '獎號3', '獎號4', '獎號5', '獎號6', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6']:
-                        val = r.get(key, '').strip()
-                        if val.isdigit():
-                            nums.append(int(val))
-                            
-                    # 彈性讀取第二區（539 沒這個欄位就維持 None）
-                    zone2 = None
-                    for z2_key in ['第二區', '特別號', 'zone2']:
-                        z2_val = r.get(z2_key, '').strip()
-                        if z2_val.isdigit():
-                            zone2 = int(z2_val)
+                    for c in cells[2:8]:
+                        if c.isdigit():
+                            nums.append(int(c))
+                        else:
                             break
-                            
+
+                    # 第二區：威力彩有9欄，第9欄(index 8)為第二區
+                    zone2 = None
+                    if len(cells) >= 9 and cells[8].isdigit():
+                        zone2 = int(cells[8])
+
                     # 只要有抓到數字（無論是5個還是6個），就視為有效資料
                     if period and len(nums) >= 5:
                         data_row = {'draw': period, 'date_str': date_str, 'date_obj': parse_date(date_str), 'nums': sorted(nums)}
-                        if zone2 is not None: 
+                        if zone2 is not None:
                             data_row['zone2'] = zone2
                         normalized.append(data_row)
                 except Exception:
                     # 如果單行解析發生無法預期的錯誤，直接略過該行，不讓引擎崩潰
                     continue
-                    
+
             if normalized: return normalized
         except Exception as e:
             last_err = e
