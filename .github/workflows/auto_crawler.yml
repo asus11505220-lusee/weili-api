@@ -28,7 +28,7 @@ jobs:
 
     - name: 4. 執行你的爬蟲主程式
       run: |
-        python debug_api3.py
+        python debug_weili.py
         
     - name: 5. 將有變動的 CSV 存檔並上傳回 GitHub
       run: |
