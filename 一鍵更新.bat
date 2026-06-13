@@ -4,55 +4,37 @@ cd /d "%~dp0"
 color 0A
 git config core.quotepath false >nul 2>&1
 
-cls
-echo ===================================================
-echo   GitHub 全檔案一鍵同步系統
-echo ===================================================
-echo.
-echo [第一步] 掃描目前所有變動的檔案：
-echo ---------------------------------------------------
 git status -s
-echo ---------------------------------------------------
 echo.
-
-set /p confirm=是否確認上傳以上變動的檔案？ y/n : 
+set /p confirm=上傳以上變動的檔案? y/n : 
 if /i "%confirm%" neq "y" goto :cancel
 
 git add -A >nul 2>&1
 git commit -m "手動全端同步：更新所有檔案與程式腳本" >nul 2>&1
 git pull --rebase >nul 2>&1
 git push >temp_push_log.txt 2>&1
-type temp_push_log.txt | findstr /C:"main -> main" >nul
-if %errorlevel%==0 (
-    set RESULT=SUCCESS
-) else (
-    set RESULT=FAIL
-)
 
-cls
-echo ===================================================
-echo            執行結果
-echo ===================================================
+findstr /C:"main -> main" temp_push_log.txt >nul
+if %errorlevel%==0 set RESULT=SUCCESS
+
+findstr /C:"up-to-date" temp_push_log.txt >nul
+if %errorlevel%==0 set RESULT=SUCCESS
+
 echo.
+echo ===========================
 if "%RESULT%"=="SUCCESS" (
-    echo   狀態：上傳成功
-    echo   檔案已同步到 GitHub
+    echo 結果：上傳成功
 ) else (
-    echo   狀態：上傳失敗
-    echo   詳細錯誤如下：
-    echo ---------------------------------------------------
+    echo 結果：上傳失敗，詳細訊息：
     type temp_push_log.txt
-    echo ---------------------------------------------------
 )
-echo.
-echo ===================================================
+echo ===========================
 del temp_push_log.txt >nul 2>&1
 pause
 goto :end
 
 :cancel
-cls
-echo 已取消上傳，未進行任何變動。
+echo 已取消
 pause
 
 :end
