@@ -1,48 +1,51 @@
-@echo off
+﻿@echo off
+setlocal enabledelayedexpansion
 chcp 65001 >nul
 cd /d "%~dp0"
 color 0A
 
-:: 🌟 關鍵修復：強制 Git 停止將中文檔名轉成數字亂碼
 git config core.quotepath false
 
 echo ===================================================
-echo   🚀 GitHub 全檔案一鍵同步系統 (變動檢視版) 🚀
+echo   GitHub Sync Tool
 echo ===================================================
 echo.
-echo [第一步] 掃描目前所有變動的檔案：
+echo [Step 1] Checking for local changes...
 echo ---------------------------------------------------
-:: 顯示目前所有有變動的檔案清單 (現在會正常顯示中文了！)
 git status -s
 echo ---------------------------------------------------
 echo.
 
-set /p confirm=是否確認上傳以上變動的檔案？ (y/n): 
-if /i "%confirm%" neq "y" goto :cancel
+set "confirm="
+set /p confirm=Confirm commit and upload these changes? (y/n): 
+if /i not "!confirm!"=="y" goto :cancel
 
 echo.
-echo [第二步] 正在進行版本打包與推送...
+echo [Step 2] Staging and committing local changes first...
 git add -A
-git commit -m "🤖 手動全端同步：更新所有檔案與程式腳本" >nul 2>&1
-git push >nul 2>&1
+git commit -m "Manual sync update"
+echo ---------------------------------------------------
+echo.
 
-:: 檢查推播是否成功
-if %ERRORLEVEL% EQU 0 (
-    echo.
-    echo ===================================================
-    echo   🎉 同步成功！檔案已推送到 GitHub。
-    echo ===================================================
-) else (
-    echo.
-    color 0C
-    echo ===================================================
-    echo   ❌ 糟糕！上傳失敗，請檢查網路連線或稍後再試。
-    echo ===================================================
-)
+echo [Step 3] Pulling latest from remote (rebase)...
+git pull --rebase
+echo ---------------------------------------------------
+echo If there is a CONFLICT message above, please screenshot it and stop here.
+echo If no conflict, press any key to continue and push.
+pause
+echo.
+
+echo [Step 4] Pushing to GitHub...
+git push
+echo ---------------------------------------------------
+echo If it shows "To https://github.com/..." above, it succeeded.
+echo ===================================================
+echo   Done. Please check the messages above.
+echo ===================================================
 pause
 goto :eof
 
 :cancel
 echo.
-echo ⏸️ 已取消上傳，未進行任何變動。
+echo Cancelled, no changes made.
 pause
