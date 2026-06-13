@@ -34,7 +34,7 @@ git push
 echo.
 echo ===================================================
 echo   流程結束，請查看上方訊息確認是否成功。
-echo   (看到 To https://github.com/... 代表上傳成功)
+echo   看到 To https://github.com/... 代表上傳成功
 echo ===================================================
 pause
 goto :end
