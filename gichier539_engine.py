@@ -174,32 +174,26 @@ def combo_bucket_bonus_v82(combo, row_map):
 
 def structure_bonus(combo):
     """
-    結構平衡加分（V110調整：權重減半，避免過度限制選號自由度）
-    奇偶：2奇3偶或3奇2偶 → +1.5（原+3.0）
-    號段：三段均有 → +1.0（原+2.0），三段各1~2顆再+0.5（原+1.0）
-    懲罰維持不變，只是降低正向加分強度
+    結構平衡加分（優化五：奇偶1或4改為輕懲-0.5，全奇/全偶重懲-2.0）
     """
     bonus = 0.0
-    # ── 約束一：奇偶平衡（加分減半，懲罰不變）──
     odd = sum(1 for n in combo if n % 2 == 1)
-    if odd in (2, 3):   bonus += 1.5   # 原+3.0 → 減半
-    elif odd in (1, 4): bonus += 0.25  # 原+0.5 → 減半
-    else:               bonus -= 2.0   # 全奇(5)或全偶(0)，懲罰不變
+    if odd in (2, 3):   bonus += 1.5   # 最佳比例，加分
+    elif odd in (1, 4): bonus -= 0.5   # 輕懲（原+0.25改為-0.5）
+    else:               bonus -= 2.0   # 全奇(5)或全偶(0)，重懲
 
-    # ── 約束二：號段均衡（加分減半，懲罰不變）──
     low  = sum(1 for n in combo if n <= 13)
     mid  = sum(1 for n in combo if 14 <= n <= 26)
     high = sum(1 for n in combo if n >= 27)
     empty_zones = [z for z in (low, mid, high) if z == 0]
     if len(empty_zones) == 0:
-        bonus += 1.0                    # 原+2.0 → 減半
+        bonus += 1.0
         balanced = sum(1 for z in (low, mid, high) if 1 <= z <= 2)
-        if balanced == 3: bonus += 0.5  # 原+1.0 → 減半
+        if balanced == 3: bonus += 0.5
     elif len(empty_zones) == 1:
-        bonus += 0.25                   # 原+0.5 → 減半
+        bonus += 0.25
     else:
-        bonus -= 1.5                    # 兩段以上空：懲罰不變
-
+        bonus -= 1.5
     return bonus
 
 
@@ -321,7 +315,8 @@ def generate_combos_v83(final_pool, pair_stats_long, triplet_stats_long, history
             max_shared = max([len(set(c) & past) for past in sum_history_map.get(c_sum, [])] + [0])
             sum_bonus = 25.0 if max_shared >= 3 else (5.0 if max_shared == 2 else 0)
             res = combo_bucket_bonus_v82(c, row_map)
-            ma_penalty = abs(c_sum - target_ma_sum) * 0.1
+            sum_dev = abs(c_sum - target_ma_sum)
+            ma_penalty = max(0, sum_dev - 25) * 0.15  # 優化四：偏離25以內免懲
             
             markov_bonus = get_markov_bonus(c, history)
             
@@ -381,7 +376,8 @@ def generate_combos_v83(final_pool, pair_stats_long, triplet_stats_long, history
             max_shared = max([len(set(c) & past) for past in sum_history_map.get(c_sum, [])] + [0])
             sum_bonus = 25.0 if max_shared >= 3 else (5.0 if max_shared == 2 else 0)
             res = combo_bucket_bonus_v82(c, row_map)
-            ma_penalty = abs(c_sum - target_ma_sum) * 0.1
+            sum_dev = abs(c_sum - target_ma_sum)
+            ma_penalty = max(0, sum_dev - 25) * 0.15  # 優化四：偏離25以內免懲
             markov_bonus = get_markov_bonus(c, history)
             
             overlap_pen = 0
@@ -520,7 +516,8 @@ def generate_combos_v83(final_pool, pair_stats_long, triplet_stats_long, history
             max_shared = max([len(set(c) & past) for past in sum_history_map.get(c_sum, [])] + [0])
             sum_bonus = 25.0 if max_shared >= 3 else (5.0 if max_shared == 2 else 0)
             res = combo_bucket_bonus_v82(c, row_map)
-            ma_penalty = abs(c_sum - target_ma_sum) * 0.1
+            sum_dev = abs(c_sum - target_ma_sum)
+            ma_penalty = max(0, sum_dev - 25) * 0.15  # 優化四：偏離25以內免懲
             markov_bonus = get_markov_bonus(c, history)
 
             overlap_pen = 0
@@ -589,7 +586,8 @@ def generate_combos_v83(final_pool, pair_stats_long, triplet_stats_long, history
             max_shared = max([len(set(c) & past) for past in sum_history_map.get(c_sum, [])] + [0])
             sum_bonus = 25.0 if max_shared >= 3 else (5.0 if max_shared == 2 else 0)
             res = combo_bucket_bonus_v82(c, row_map)
-            ma_penalty = abs(c_sum - target_ma_sum) * 0.1
+            sum_dev = abs(c_sum - target_ma_sum)
+            ma_penalty = max(0, sum_dev - 25) * 0.15  # 優化四：偏離25以內免懲
             markov_bonus = get_markov_bonus(c, history)
 
             # 冷號突破放寬重疊懲罰
@@ -828,7 +826,7 @@ def run_detailed_backtest(data, ref_start_idx, test_start_idx, test_end_idx):
             writer = csv.writer(f)
             
             # 寫入摘要資訊
-            writer.writerow(['📊 V111 前鋒保護全覆蓋版 詳細回測報告'])
+            writer.writerow(['📊 V115 輕量優化版 詳細回測報告'])
             writer.writerow([f'回測區間', f'第 {start_draw} 期 ~ 第 {end_draw} 期', f'共 {total} 期'])
             writer.writerow(['⭐ 平均最佳命中', f'{avg_hit:.2f} 顆'])
             writer.writerow(['🎯 最佳命中 ≥2顆', f'{ge2} 次 ({ge2 * 100 / total:.2f}%)'])
@@ -860,7 +858,7 @@ def backtest(data, start_idx, end_idx):
     start_bt = max(start_idx + 10, end_idx - BACKTEST_LOOKBACK + 1)
     total_steps = end_idx + 1 - start_bt
     if total_steps <= 0: return []
-    print(f'\n[系統提示] 啟動 V111 前鋒保護全覆蓋版，正在進行 {total_steps} 期極速回測...')
+    print(f'\n[系統提示] 啟動 V115 輕量優化版，正在進行 {total_steps} 期極速回測...')
     for step, target_idx in enumerate(range(start_bt, end_idx + 1), 1):
         sys.stdout.write(f'\r回測進度: [{step}/{total_steps}] 正在計算第 {data[target_idx]["draw"]} 期...')
         sys.stdout.flush()
@@ -879,7 +877,7 @@ def draw_map(data):
 
 def print_header(data, encoding):
     print('=' * 90)
-    print('539 V111 前鋒保護全覆蓋版 (前4組保護 + 後8組全覆蓋 + 結構輕量加分)')
+    print('539 V115 輕量優化版 (奇偶強化+和值放寬+全覆蓋 gichier基底)')
     print('=' * 90)
     print(f'資料來源檔：{CSV_NAME}')
     print(f'讀取編碼：{encoding}')
@@ -979,7 +977,7 @@ def main():
     print('\n深水核心池 (24 顆六維強勢號 + 6 顆極端冷號)：')
     print([x['num'] for x in all_scored[:30]])
 
-    print('\n預測組合（V111 前鋒保護全覆蓋版：前4組保護 + 後8組全覆蓋）：')
+    print('\n預測組合（V115 輕量優化版：奇偶強化+和值放寬+全覆蓋）：')
 
     # 覆蓋率統計
     covered_set = set(n for c, *_ in combos for n in c)
@@ -1011,7 +1009,7 @@ def main():
 
         bt = backtest(data, start_idx, end_idx)
         if bt:
-            print('\nV111 回測摘要 (前4組保護+後8組全覆蓋)：')
+            print('\nV115 回測摘要：')
             print(f'樣本數：{len(bt)}')
             print(f'平均最佳命中：{round(sum(bt) / len(bt), 2)} 顆')
             print(f'最佳命中≥2顆：{sum(1 for x in bt if x >= 2)} 次 ({round(sum(1 for x in bt if x >= 2) * 100 / len(bt), 2)}%)')
