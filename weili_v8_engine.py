@@ -162,7 +162,7 @@ def build_advanced_stats(history_wl, bonds_539):
     return pair_count, triplet_count, z1_z2_pair_count, p5_counter, p10_counter, p15_counter, p20_counter, single_freq
 
 # ================= 🧪 第一區：V18 化學軌域引擎（歷史黑名單+近期衰減+三元核心固定）=================
-def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=16, history_wl=None):
+def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=16, history_wl=None, trend_539=None):
     
     # 🎯【核心修正 1】：鎖定隨機亂數種子，保證相同資料產出相同結果
     if history_wl:
@@ -256,6 +256,15 @@ def generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p1
     hotness = {n: (single_freq[5][n]*4 + single_freq[10][n]*3 +
                    single_freq[15][n]*2 + single_freq[20][n]*1)
                for n in range(1, 39)}
+
+    # ── V31：539趨勢加權（539近50期比前50期「加速出現」的號碼，威力彩出現機率↑）──
+    # 數據驗證：114000055開獎[1,2,7,14,28,31]中，1(Δ+2)、2(Δ+3)、28(Δ+7)全在539上升趨勢Top10
+    # 規則：539 Δ>0（趨勢上升）的號碼，以 Δ×2.5 加入威力彩熱度
+    if trend_539:
+        for n, delta in trend_539.items():
+            if 1 <= n <= 38 and delta > 0:
+                hotness[n] = hotness.get(n, 0) + delta * 2.5  # 趨勢正向加成
+
     # 🎯【核心修正 3】：熱度平手時，以號碼大小決定先後順序
     ranked = sorted(hotness.keys(), key=lambda k: (hotness[k], k), reverse=True)
 
@@ -679,9 +688,21 @@ def main():
         ref_date = work_wl[-1]['date_obj'] if work_wl else datetime.now()
         top_539_singles, bonds_539 = get_539_chemical_bonds(history_539, ref_date)
         pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(work_wl, bonds_539)
+        # V31：計算539趨勢（近50期 vs 前50期的頻率變化）
+        trend_539 = {}
+        if history_539:
+            cut_date = ref_date
+            h539_before_cut = [r for r in history_539 if r.get('date_obj', cut_date) <= cut_date]
+            r539_recent = [r['nums'] for r in h539_before_cut[-50:]]
+            r539_prev   = [r['nums'] for r in h539_before_cut[-100:-50]]
+            if r539_recent and r539_prev:
+                from collections import Counter as _C
+                f_recent = _C(n for d in r539_recent for n in d if 1<=n<=38)
+                f_prev   = _C(n for d in r539_prev   for n in d if 1<=n<=38)
+                trend_539 = {n: f_recent.get(n,0)-f_prev.get(n,0) for n in range(1,39)}
         
         print('\n⚙️ 啟動 V33 霸王引擎 (單期驗證：啟動 100x 深度蒙地卡羅爆破)...')
-        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=16, history_wl=work_wl)
+        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=16, history_wl=work_wl, trend_539=trend_539)
         zone2_ordered, z2_scores = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, work_wl)
         _, resonance, wave_log = wave_zone2_predict(work_wl)
         print('\n🌊 第二區聲波干涉分析報告')
@@ -711,8 +732,20 @@ def main():
         ref_date = work_wl[-1]['date_obj'] if work_wl else datetime.now()
         top_539_singles, bonds_539 = get_539_chemical_bonds(history_539, ref_date)
         pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(work_wl, bonds_539)
+        # V31：計算539趨勢（近50期 vs 前50期的頻率變化）
+        trend_539 = {}
+        if history_539:
+            cut_date = ref_date
+            h539_before_cut = [r for r in history_539 if r.get('date_obj', cut_date) <= cut_date]
+            r539_recent = [r['nums'] for r in h539_before_cut[-50:]]
+            r539_prev   = [r['nums'] for r in h539_before_cut[-100:-50]]
+            if r539_recent and r539_prev:
+                from collections import Counter as _C
+                f_recent = _C(n for d in r539_recent for n in d if 1<=n<=38)
+                f_prev   = _C(n for d in r539_prev   for n in d if 1<=n<=38)
+                trend_539 = {n: f_recent.get(n,0)-f_prev.get(n,0) for n in range(1,39)}
         print('\n⚙️ 啟動 V22 引擎 (預測未來：100x 深度蒙地卡羅爆破)...')
-        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=16, history_wl=work_wl)
+        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=16, history_wl=work_wl, trend_539=trend_539)
         zone2_ordered, z2_scores = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, work_wl)
         _, resonance, wave_log = wave_zone2_predict(work_wl)
         print('\n🌊 第二區聲波干涉分析報告')
@@ -754,8 +787,18 @@ def main():
             
             top_539_singles, bonds_539 = get_539_chemical_bonds(history_539, ref_date)
             pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(work_wl, bonds_539)
+            # V31：539趨勢計算（在迴圈內，每期獨立計算）
+            trend_539 = {}
+            if history_539:
+                h539_cut = [r for r in history_539 if r.get('date_obj', ref_date) <= ref_date]
+                r539_recent = [r['nums'] for r in h539_cut[-50:]]
+                r539_prev   = [r['nums'] for r in h539_cut[-100:-50]]
+                if r539_recent and r539_prev:
+                    f_r = Counter(n for d in r539_recent for n in d if 1<=n<=38)
+                    f_p = Counter(n for d in r539_prev   for n in d if 1<=n<=38)
+                    trend_539 = {n: f_r.get(n,0)-f_p.get(n,0) for n in range(1,39)}
             
-            zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=16, history_wl=work_wl)
+            zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=16, history_wl=work_wl, trend_539=trend_539)
             zone2_ordered, _ = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, work_wl)
             
             period_max_z1 = 0
@@ -823,7 +866,18 @@ def get_prediction(zodiac_id: int):
         # 精準對接原始程式碼的「多維時間窗」與「聲波干涉」連鎖函數
         top_539_singles, bonds_539 = get_539_chemical_bonds(history_539, ref_date)
         pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(history_wl, bonds_539)
-        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=16, history_wl=history_wl)
+        # V31：539趨勢計算
+        trend_539 = {}
+        if history_539:
+            h539_cut = [r for r in history_539 if r.get('date_obj', ref_date) <= ref_date]
+            r539_recent = [r['nums'] for r in h539_cut[-50:]]
+            r539_prev   = [r['nums'] for r in h539_cut[-100:-50]]
+            if r539_recent and r539_prev:
+                from collections import Counter as _C
+                f_r = _C(n for d in r539_recent for n in d if 1<=n<=38)
+                f_p = _C(n for d in r539_prev   for n in d if 1<=n<=38)
+                trend_539 = {n: f_r.get(n,0)-f_p.get(n,0) for n in range(1,39)}
+        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=16, history_wl=history_wl, trend_539=trend_539)
         zone2_ordered, z2_scores = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, history_wl)
 
         # 根據生肖分配 12 組號碼
