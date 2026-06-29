@@ -7,23 +7,33 @@ HEADERS = {
     "Referer": "https://www.taiwanlottery.com/",
 }
 
-url = "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/LottoResult"
+# 嘗試各種可能的大樂透API endpoint
+endpoints = [
+    "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/LottoResult",
+    "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/BigLottoResult",
+    "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/Lotto649Result",
+    "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/DaLottoResult",
+    "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/Lotto638Result",
+]
 
-# 查詢最近幾期（你CSV最後一期是115000065）
-for period in ["115000064", "115000065", "115000066"]:
-    print(f"===== 大樂透 period={period} =====")
+for url in endpoints:
+    print(f"===== {url.split('/')[-1]} =====")
     try:
-        r = requests.get(url, params={"period": period}, headers=HEADERS, timeout=15)
-        print("status:", r.status_code)
-        body = r.json()
-        print("rtCode:", body.get("rtCode"))
-        content = body.get("content") or {}
-        print("content keys:", list(content.keys()))
-        # 找所有可能的資料key
-        for key, val in content.items():
-            if val and key != "totalSize":
-                print(f"{key}:")
-                print(json.dumps(val[0] if isinstance(val, list) else val, ensure_ascii=False, indent=2))
+        r = requests.get(url, params={"period": "115000065"}, headers=HEADERS, timeout=10)
+        print(f"status: {r.status_code}")
+        if r.status_code == 200:
+            print(r.text[:500])
+        else:
+            print(r.text[:200])
     except Exception as e:
-        print("錯誤:", e)
+        print(f"錯誤: {e}")
     print()
+
+# 也試試不帶period參數
+print("===== LottoResult 不帶參數 =====")
+try:
+    r = requests.get("https://api.taiwanlottery.com/TLCAPIWeB/Lottery/LottoResult", headers=HEADERS, timeout=10)
+    print(f"status: {r.status_code}")
+    print(r.text[:500])
+except Exception as e:
+    print(f"錯誤: {e}")
