@@ -7,6 +7,7 @@ from numpy.fft import fft, fftfreq
 from collections import Counter
 from itertools import combinations, permutations
 from datetime import datetime
+import unicodedata
 
 # ================= 配置區 =================
 WEILI_CSV = '威力彩_歷史資料.csv'
@@ -640,9 +641,144 @@ def ask_mode():
     print('1. 驗證單一期數 (輸入歷史期數，盲測並比對實際開獎)')
     print('2. 預測未來期數 (使用所有資料，產出下一期最新推薦號碼)')
     print('3. 批量回測驗證 (測試過去 N 期，統計綜合命中率)')
+    print('4. 近15期逐組命中對照矩陣 (免設定區間，直接用現有歷史)')
     while True:
-        m = input('👉 輸入 1, 2 或 3：').strip()
-        if m in ['1', '2', '3']: return m
+        m = input('👉 輸入 1, 2, 3 或 4：').strip()
+        if m in ['1', '2', '3', '4']: return m
+
+def _dwwl(s):
+    """顯示寬度（全形/CJK 算 2，半形算 1），供終端機表格對齊"""
+    return sum(2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1 for c in str(s))
+
+def _padwl(s, width, align='left'):
+    s = str(s)
+    gap = max(0, width - _dwwl(s))
+    return (s + ' ' * gap) if align == 'left' else (' ' * gap + s)
+
+def run_grid15_backtest_weili(history_wl, history_539):
+    """模式4：近15期逐組命中對照矩陣（威力彩）
+       橫排 = 組01~組12，直排 = 近15期期號。
+       格值 = 第一區命中顆數(第二區命中顆數)，例如 3(1) = 第一區中3碼且第二區中。
+       「最佳」與「該組合計」同樣以括號顯示第二區。
+       參考歷史 = 全部現有資料（免設定區間）；引擎以最後期號為種子 → 與模式1/3結果一致。"""
+    last_n = 15
+    total = len(history_wl)
+    start_idx = max(2, total - last_n)             # 至少要有歷史可參考；engine需 idx>=1
+    target_indices = list(range(start_idx, total))
+    n_periods = len(target_indices)
+    if n_periods == 0:
+        print('資料不足，無法回測。')
+        return
+    if n_periods < last_n:
+        print(f'[提示] 可回測期數不足 {last_n} 期，實際回測 {n_periods} 期。')
+
+    print(f'\n🚀 啟動近 {n_periods} 期逐組命中矩陣回測（參考歷史 = 全部現有資料）...')
+
+    sets = 12
+    periods, actuals = [], []
+    grid = [[(0, 0)] * n_periods for _ in range(sets)]   # grid[組][期] = (第一區命中, 第二區命中0/1)
+
+    for col, target_idx in enumerate(target_indices):
+        work_wl = history_wl[:target_idx]
+        target_actual = history_wl[target_idx]
+        ref_date = work_wl[-1]['date_obj']
+
+        top_539_singles, bonds_539 = get_539_chemical_bonds(history_539, ref_date)
+        pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(work_wl, bonds_539)
+
+        trend_539 = {}
+        if history_539:
+            h539_cut = [r for r in history_539 if r.get('date_obj', ref_date) <= ref_date]
+            r539_recent = [r['nums'] for r in h539_cut[-50:]]
+            r539_prev   = [r['nums'] for r in h539_cut[-100:-50]]
+            if r539_recent and r539_prev:
+                f_r = Counter(n for d in r539_recent for n in d if 1 <= n <= 38)
+                f_p = Counter(n for d in r539_prev   for n in d if 1 <= n <= 38)
+                trend_539 = {n: f_r.get(n, 0) - f_p.get(n, 0) for n in range(1, 39)}
+
+        zone1_combos = generate_zone1_hedging_matrix(single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539, mc_runs=16, history_wl=work_wl, trend_539=trend_539)
+        zone2_ordered, _ = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, work_wl)
+
+        actual_z1 = set(target_actual['nums'])
+        actual_z2 = target_actual.get('zone2')
+        periods.append(target_actual['draw'])
+        actuals.append((sorted(target_actual['nums']), actual_z2))
+
+        for r in range(sets):
+            if r < len(zone1_combos):
+                z1_hit = len(set(zone1_combos[r]['combo']) & actual_z1)
+                z2_hit = 1 if (actual_z2 is not None and zone2_ordered[r] == actual_z2) else 0
+                grid[r][col] = (z1_hit, z2_hit)
+        print(f'  進度 [{col + 1}/{n_periods}] 第 {periods[-1]} 期完成')
+
+    # ── 每期最佳：第一區最高(同分取第二區有中者)──
+    def period_best(col):
+        bz1 = max(grid[r][col][0] for r in range(sets))
+        bz2 = max(grid[r][col][1] for r in range(sets) if grid[r][col][0] == bz1)
+        return bz1, bz2
+
+    # ── 排版參數 ──
+    cell_strs = []
+    for col in range(n_periods):
+        for r in range(sets):
+            z1, z2 = grid[r][col]
+            cell_strs.append(f'{z1}({z2})')
+        b1, b2 = period_best(col)
+        cell_strs.append(f'{b1}({b2})')
+    for r in range(sets):
+        s1 = sum(grid[r][col][0] for col in range(n_periods))
+        s2 = sum(grid[r][col][1] for col in range(n_periods))
+        cell_strs.append(f'{s1}({s2})')
+    col_w = max([6] + [_dwwl(s) + 1 for s in cell_strs] + [_dwwl(f'組{r+1:02d}') + 1 for r in range(sets)])
+    LABEL_W = max(10, max(_dwwl(p) for p in periods) + 2)
+
+    # ── 期號對照 ──
+    print('\n【期號對照（期號 → 實際開獎；＋二區）】')
+    for p, (an, z2) in zip(periods, actuals):
+        z2s = f'  ＋二區 {z2:02d}' if z2 is not None else ''
+        print(f'  {p} → ' + ' '.join(f'{n:02d}' for n in an) + z2s)
+
+    # ── 矩陣本體（橫排=組01~組12，直排=各期期號）──
+    print('\n【逐組命中矩陣（格值 = 第一區命中(第二區命中)）】')
+    header = _padwl('期號＼組', LABEL_W) + ''.join(_padwl(f'組{r + 1:02d}', col_w, 'right') for r in range(sets)) + _padwl('最佳', col_w, 'right')
+    print(header)
+    print('-' * _dwwl(header))
+    for col in range(n_periods):
+        cells = ''.join(_padwl(f'{grid[r][col][0]}({grid[r][col][1]})', col_w, 'right') for r in range(sets))
+        b1, b2 = period_best(col)
+        print(_padwl(str(periods[col]), LABEL_W) + cells + _padwl(f'{b1}({b2})', col_w, 'right'))
+    print('-' * _dwwl(header))
+    sum_cells = ''.join(_padwl(f'{sum(grid[r][col][0] for col in range(n_periods))}({sum(grid[r][col][1] for col in range(n_periods))})', col_w, 'right') for r in range(sets))
+    print(_padwl('該組合計', LABEL_W) + sum_cells)
+
+    # ── 摘要 ──
+    flat_z1 = [grid[r][col][0] for r in range(sets) for col in range(n_periods)]
+    z2_tickets = sum(grid[r][col][1] for r in range(sets) for col in range(n_periods))
+    z2_periods = sum(1 for col in range(n_periods) if any(grid[r][col][1] for r in range(sets)))
+    print(f'\n📊 摘要：{n_periods} 期 × {sets} 組 = {len(flat_z1)} 注')
+    print(f'   第一區：最高單注 {max(flat_z1)} 碼；達3+ {sum(1 for x in flat_z1 if x >= 3)} 注、'
+          f'達4+ {sum(1 for x in flat_z1 if x >= 4)} 注、達5+ {sum(1 for x in flat_z1 if x >= 5)} 注、'
+          f'中6 {sum(1 for x in flat_z1 if x >= 6)} 注。')
+    print(f'   第二區：命中 {z2_tickets} 注；涵蓋到第二區的期數 {z2_periods}/{n_periods} 期。')
+
+    # ── 輸出 CSV（列=期號、欄=組01~組12，值="第一區(第二區)"）──
+    csv_name = f'近{n_periods}期逐組命中矩陣_威力彩_{periods[0]}_{periods[-1]}.csv'
+    try:
+        with open(csv_name, 'w', encoding='utf-8-sig', newline='') as f:
+            w = csv.writer(f)
+            w.writerow(['期號'] + [f'組{r + 1:02d}' for r in range(sets)] + ['最佳', '實際開獎'])
+            for col in range(n_periods):
+                b1, b2 = period_best(col)
+                an, z2 = actuals[col]
+                actual_str = ' '.join(f'{n:02d}' for n in an) + (f' +二區{z2:02d}' if z2 is not None else '')
+                row = [periods[col]] + [f'{grid[r][col][0]}({grid[r][col][1]})' for r in range(sets)] + [f'{b1}({b2})', actual_str]
+                w.writerow(row)
+            total_row = ['該組合計'] + [f'{sum(grid[r][col][0] for col in range(n_periods))}({sum(grid[r][col][1] for col in range(n_periods))})' for r in range(sets)] + ['', '']
+            w.writerow(total_row)
+        print(f'\n✅ 已輸出矩陣至：{csv_name}')
+    except Exception as e:
+        print(f'⚠️ 寫入 CSV 失敗：{e}')
+
 
 def main():
     try: os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -836,6 +972,9 @@ def main():
         n_groups_actual = len(zone1_combos)
         print(f"   - 總計命中的第二區注數     : {total_z2_tickets} 注 (佔總產出 {bt_count*n_groups_actual} 注的 {total_z2_tickets/(bt_count*n_groups_actual)*100:.1f}%)")
         print("="*80)
+
+    elif mode == '4':
+        run_grid15_backtest_weili(history_wl, history_539)
 
     print('\n✅ 執行完畢！')
 

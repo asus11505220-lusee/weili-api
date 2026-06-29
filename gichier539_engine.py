@@ -7,6 +7,7 @@ from itertools import combinations
 from collections import Counter
 import copy
 import sys
+import unicodedata
 
 CSV_NAME = '今彩539_歷史資料.csv'
 ENCODINGS = ['utf-8-sig', 'cp950', 'big5', 'utf-8']
@@ -890,8 +891,9 @@ def ask_mode():
     print('1. 驗證已開獎期數（可看命中與回測）')
     print('2. 預測未來未開期數（僅輸出候選組合）')
     print('3. 自訂區間詳細回測（回測明細儲存為 CSV）')
-    mode = input('輸入 1, 2 或 3：').strip()
-    if mode not in {'1', '2', '3'}: raise Exception('錯誤')
+    print('4. 近15期逐組命中對照矩陣（免設定區間，直接用現有歷史）')
+    mode = input('輸入 1, 2, 3 或 4：').strip()
+    if mode not in {'1', '2', '3', '4'}: raise Exception('錯誤')
     return mode
 
 def ask_draw(prompt):
@@ -909,6 +911,96 @@ def print_colored_history(history, highlight_nums):
         nums_str = [f"{color_map[n]} {n:02d} {RESET_COLOR}" if n in color_map else f" {n:02d} " for n in row['nums']]
         print(f"第 {row['draw']} 期 [{row['date']}] : " + "  ".join(nums_str))
     print('=' * 90 + '\n')
+
+def _dw539(s):
+    """顯示寬度（全形/CJK 算 2，半形算 1），供終端機表格對齊"""
+    return sum(2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1 for c in str(s))
+
+def _pad539(s, width, align='left'):
+    s = str(s)
+    gap = max(0, width - _dw539(s))
+    return (s + ' ' * gap) if align == 'left' else (' ' * gap + s)
+
+def run_grid15_backtest(data):
+    """模式4：近15期逐組命中對照矩陣（今彩539）
+       橫排 = 組01~組12，直排 = 近15期期號，格值 = 該組命中顆數（0~5）。
+       參考歷史 = 全部現有資料（免設定區間）；算法與模式1相同。
+       註：539 無特別號；引擎含隨機探索階段，重跑可能略有差異。"""
+    sets = MAX_COMBOS
+    last_n = 15
+    total = len(data)
+    start_idx = max(15, total - last_n)            # 至少要有15期歷史可參考
+    target_indices = list(range(start_idx, total))
+    n_periods = len(target_indices)
+    if n_periods == 0:
+        print('資料不足，無法回測。')
+        return
+    if n_periods < last_n:
+        print(f'[提示] 可回測期數不足 {last_n} 期，實際回測 {n_periods} 期。')
+
+    print(f'\n[系統提示] 啟動近 {n_periods} 期逐組命中矩陣回測（參考歷史 = 全部現有資料）...')
+
+    periods, actuals = [], []
+    grid = [[0] * n_periods for _ in range(sets)]   # grid[組][期] = 命中顆數
+
+    for col, target_idx in enumerate(target_indices):
+        history = data[0:target_idx]               # 全部現有歷史當參考
+        actual = data[target_idx]['nums']
+        periods.append(data[target_idx]['draw'])
+        actuals.append(sorted(actual))
+        all_scored, pair_stats_long, triplet_stats_long = build_pool_v82(history)
+        combos, _ = generate_combos_v83(all_scored, pair_stats_long, triplet_stats_long, history)
+        for r in range(sets):
+            if r < len(combos):
+                grid[r][col] = len(set(combos[r][0]) & set(actual))
+        sys.stdout.write(f'\r回測進度: [{col + 1}/{n_periods}] 第 {periods[-1]} 期...')
+        sys.stdout.flush()
+    print()
+
+    # ── 排版參數：列=期號、欄=組01~組12 ──
+    LABEL_W = max(10, max(_dw539(p) for p in periods) + 2)
+    col_w = 5
+
+    # ── 期號對照 ──
+    print('\n【期號對照（期號 → 實際開獎）】')
+    for p, an in zip(periods, actuals):
+        print(f'  {p} → ' + ' '.join(f'{n:02d}' for n in an))
+
+    # ── 矩陣本體（橫排=組01~組12，直排=各期期號）──
+    print('\n【逐組命中矩陣（數字 = 該組命中顆數，0~5）】')
+    header = _pad539('期號＼組', LABEL_W) + ''.join(_pad539(f'組{r + 1:02d}', col_w, 'right') for r in range(sets)) + _pad539('最佳', col_w, 'right')
+    print(header)
+    print('-' * _dw539(header))
+    for col in range(n_periods):
+        cells = ''.join(_pad539(str(grid[r][col]), col_w, 'right') for r in range(sets))
+        best = max(grid[r][col] for r in range(sets))
+        print(_pad539(str(periods[col]), LABEL_W) + cells + _pad539(str(best), col_w, 'right'))
+    print('-' * _dw539(header))
+    sum_cells = ''.join(_pad539(str(sum(grid[r][col] for col in range(n_periods))), col_w, 'right') for r in range(sets))
+    print(_pad539('該組合計', LABEL_W) + sum_cells)
+
+    # ── 摘要 ──
+    flat = [grid[r][col] for r in range(sets) for col in range(n_periods)]
+    print(f'\n📊 摘要：{n_periods} 期 × {sets} 組 = {len(flat)} 注；'
+          f'最高單注 {max(flat)} 顆；達2+ {sum(1 for x in flat if x >= 2)} 注、'
+          f'達3+ {sum(1 for x in flat if x >= 3)} 注、達4+ {sum(1 for x in flat if x >= 4)} 注、'
+          f'中5 {sum(1 for x in flat if x >= 5)} 注。')
+
+    # ── 輸出 CSV（列=期號、欄=組01~組12）──
+    csv_name = f'近{n_periods}期逐組命中矩陣_{periods[0]}_{periods[-1]}.csv'
+    try:
+        with open(csv_name, 'w', encoding='utf-8-sig', newline='') as f:
+            w = csv.writer(f)
+            w.writerow(['期號'] + [f'組{r + 1:02d}' for r in range(sets)] + ['最佳', '實際開獎'])
+            for col in range(n_periods):
+                best = max(grid[r][col] for r in range(sets))
+                row = [periods[col]] + [grid[r][col] for r in range(sets)] + [best, ' '.join(f'{n:02d}' for n in actuals[col])]
+                w.writerow(row)
+            w.writerow(['該組合計'] + [sum(grid[r][col] for col in range(n_periods)) for r in range(sets)] + ['', ''])
+        print(f'\n✅ 已輸出矩陣至：{csv_name}')
+    except Exception as e:
+        print(f'⚠️ 寫入 CSV 失敗：{e}')
+
 
 def main():
     os.system('') 
@@ -938,6 +1030,12 @@ def main():
         test_end_idx = dmap[test_end_draw]
         
         run_detailed_backtest(data, ref_start_idx, test_start_idx, test_end_idx)
+        print('\n請按任意鍵繼續 . . .')
+        input()
+        return
+
+    if mode == '4':
+        run_grid15_backtest(data)
         print('\n請按任意鍵繼續 . . .')
         input()
         return
