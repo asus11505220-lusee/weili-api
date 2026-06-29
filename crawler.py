@@ -9,7 +9,7 @@ FILE_LOTTO = '大樂透_歷史資料.csv'
 
 API_539   = "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/Daily539Result"
 API_WEILI = "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/SuperLotto638Result"
-API_LOTTO = "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/LottoResult"
+API_LOTTO = "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/Lotto649Result"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -136,13 +136,12 @@ def fetch_lotto():
             break
         date = format_date(item.get("lotteryDate", ""))
         size_arr = item.get("drawNumberSize") or []
-        special = item.get("specialNo") or item.get("bonusNum") or item.get("drawNumberBonus")
-        if len(size_arr) < 6 or special is None:
-            print(f"⚠️ [大樂透] 第{next_issue}期號碼異常，略過: nums={size_arr}, special={special}")
-            print(f"   原始item keys: {list(item.keys())}")
+        # drawNumberSize 共7個數字：前6個為主號(已排序)，第7個為特別號
+        if len(size_arr) != 7:
+            print(f"⚠️ [大樂透] 第{next_issue}期號碼數量異常，略過: {size_arr}")
             continue
         nums = [str(n).zfill(2) for n in size_arr[:6]]
-        special_str = str(special).zfill(2)
+        special_str = str(size_arr[6]).zfill(2)
         row = [str(next_issue), date] + nums + [special_str]
         with open(FILE_LOTTO, 'a', newline='', encoding='utf-8-sig') as f:
             csv.writer(f).writerow(row)
