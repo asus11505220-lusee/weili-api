@@ -3,3 +3,4 @@ uvicorn
 numpy
 cloudscraper
 beautifulsoup4
+pandas
