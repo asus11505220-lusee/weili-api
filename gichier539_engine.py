@@ -1168,3 +1168,71 @@ def get_prediction(zodiac_id: int):
         }
     except Exception as e:
         return {"status": "error", "message": f"今彩539引擎發生錯誤: {str(e)}"}
+
+
+def get_all_predictions():
+    """一次取得全部 12 組生肖預測，供回測比對用。返回 [(zone1_list, None)] * 12。"""
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(base_dir, CSV_NAME)
+        data, _ = load_csv(csv_path)
+        if not data:
+            return [([], None)] * 12
+        history = data[:]
+        all_scored, pair_stats, triplet_stats = build_pool_v82(history)
+        combos, _ = generate_combos_v83(all_scored, pair_stats, triplet_stats, history)
+        n = len(combos)
+        result = []
+        for i in range(12):
+            idx = i % n if n else 0
+            raw = combos[idx] if n else []
+            if isinstance(raw, tuple) and raw and isinstance(raw[0], (list, tuple)):
+                zone1 = list(raw[0])
+            else:
+                zone1 = list(raw)
+            zone1 = [int(x) for x in zone1 if str(x).isdigit()][:5]
+            result.append((zone1, None))
+        return result
+    except Exception:
+        return [([], None)] * 12
+
+
+def get_backtest_detail(limit: int = 15) -> list:
+    """
+    真實 out-of-sample 回測：對最近 limit 期，各自用「該期之前的資料」預測，
+    再與實際開獎比較，回傳每期每組生肖的命中數。
+    邏輯完全對應 run_grid15_backtest() 的 history = data[0:target_idx] 設計。
+    今彩539 無特別號，has_special 固定為 False。
+    """
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(base_dir, CSV_NAME)
+        data, _ = load_csv(csv_path)
+        if not data:
+            return []
+        total = len(data)
+        start_idx = max(30, total - limit)
+        results = []
+        for test_idx in range(start_idx, total):
+            test_row = data[test_idx]
+            history = data[0:test_idx]
+            if len(history) < 15:
+                continue
+            actual_nums = set(test_row['nums'])
+            all_scored, pair_stats_long, triplet_stats_long = build_pool_v82(history)
+            combos, _ = generate_combos_v83(all_scored, pair_stats_long, triplet_stats_long, history)
+            n = len(combos)
+            zodiac_hits = []
+            for i in range(12):
+                idx = i % n if n else 0
+                pred_set = set(combos[idx][0]) if n else set()
+                hit_count = len(pred_set & actual_nums)
+                zodiac_hits.append({'zodiac_id': i + 1, 'hit_count': hit_count, 'has_special': False})
+            results.append({
+                'draw_term': str(test_row['draw']),
+                'draw_date': str(test_row.get('date', '')),
+                'zodiac_hits': zodiac_hits,
+            })
+        return results
+    except Exception:
+        return []

@@ -1036,3 +1036,117 @@ def get_prediction(zodiac_id: int):
         }
     except Exception as e:
         return {"status": "error", "message": f"威力彩引擎發生錯誤: {str(e)}"}
+
+
+def get_backtest_detail(limit: int = 15) -> list:
+    """
+    True out-of-sample backtest for 威力彩.
+    For each of the last limit periods, uses only data BEFORE that period
+    to generate predictions, then compares with the actual draw.
+    Mirrors the same logic as dalotto_engine.get_backtest_detail().
+    """
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(base_dir, WEILI_CSV)
+        data = load_csv(csv_path)
+        if not data:
+            return []
+
+        c539_path = os.path.join(base_dir, C539_CSV)
+        history_539_all = load_csv(c539_path) or []
+
+        total = len(data)
+        start_idx = max(30, total - limit)
+
+        results = []
+        for test_idx in range(start_idx, total):
+            test_row   = data[test_idx]
+            train_data = data[:test_idx]          # only data before this period
+
+            actual_nums  = set(test_row['nums'])
+            actual_zone2 = test_row.get('zone2', None)
+            ref_date     = train_data[-1]['date_obj'] if train_data else datetime.now()
+
+            # Build stats using training data only (get_539_chemical_bonds filters by ref_date)
+            top_539_singles, bonds_539 = get_539_chemical_bonds(history_539_all, ref_date)
+            pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = \
+                build_advanced_stats(train_data, bonds_539)
+
+            trend_539 = {}
+            if history_539_all:
+                h539_cut    = [r for r in history_539_all if r.get('date_obj', ref_date) <= ref_date]
+                r539_recent = [r['nums'] for r in h539_cut[-50:]]
+                r539_prev   = [r['nums'] for r in h539_cut[-100:-50]]
+                if r539_recent and r539_prev:
+                    from collections import Counter as _C
+                    f_r = _C(x for row in r539_recent for x in row if 1 <= x <= 38)
+                    f_p = _C(x for row in r539_prev   for x in row if 1 <= x <= 38)
+                    trend_539 = {x: f_r.get(x, 0) - f_p.get(x, 0) for x in range(1, 39)}
+
+            zone1_combos = generate_zone1_hedging_matrix(
+                single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539,
+                mc_runs=16, history_wl=train_data, trend_539=trend_539,
+            )
+            zone2_ordered, _ = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, train_data)
+
+            nc = len(zone1_combos)
+            zodiac_hits = []
+            for i in range(12):
+                idx       = i % nc if nc else 0
+                pred_z1   = set(zone1_combos[idx]['combo']) if nc else set()
+                pred_z2   = zone2_ordered[idx] if idx < len(zone2_ordered) else None
+                hit_main  = len(pred_z1 & actual_nums)
+                has_sp    = (actual_zone2 is not None) and (pred_z2 is not None) and (pred_z2 == actual_zone2)
+                hit_count = hit_main + (1 if has_sp else 0)
+                zodiac_hits.append({'zodiac_id': i + 1, 'hit_count': hit_count, 'has_special': has_sp})
+
+            results.append({
+                'draw_term': str(test_row['draw']),
+                'draw_date': test_row.get('date_str', ''),
+                'zodiac_hits': zodiac_hits,
+            })
+
+        return results
+    except Exception as e:
+        raise RuntimeError(f"威力彩回測失敗: {str(e)}")
+
+
+def get_all_predictions():
+    """一次取得全部 12 組生肖預測，供回測比對用。返回 [(zone1_list, zone2_int_or_None)] * 12。"""
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(base_dir, WEILI_CSV)
+        data = load_csv(csv_path)
+        if not data:
+            return [([], None)] * 12
+        history_wl = data[:]
+        c539_path = os.path.join(base_dir, C539_CSV)
+        history_539 = load_csv(c539_path)
+        ref_date = history_wl[-1]['date_obj'] if history_wl else datetime.now()
+        top_539_singles, bonds_539 = get_539_chemical_bonds(history_539, ref_date)
+        pair_stats, triplet_stats, z1_z2_pair_count, p5, p10, p15, p20, single_freq = build_advanced_stats(history_wl, bonds_539)
+        trend_539 = {}
+        if history_539:
+            h539_cut = [r for r in history_539 if r.get('date_obj', ref_date) <= ref_date]
+            r539_recent = [r['nums'] for r in h539_cut[-50:]]
+            r539_prev   = [r['nums'] for r in h539_cut[-100:-50]]
+            if r539_recent and r539_prev:
+                from collections import Counter as _C
+                f_r = _C(n for d in r539_recent for n in d if 1 <= n <= 38)
+                f_p = _C(n for d in r539_prev   for n in d if 1 <= n <= 38)
+                trend_539 = {n: f_r.get(n, 0) - f_p.get(n, 0) for n in range(1, 39)}
+        zone1_combos = generate_zone1_hedging_matrix(
+            single_freq, pair_stats, triplet_stats, p5, p10, p15, p20, bonds_539,
+            mc_runs=16, history_wl=history_wl, trend_539=trend_539,
+        )
+        zone2_ordered, _ = assign_zone2_perfect_match(zone1_combos, z1_z2_pair_count, history_wl)
+        n = len(zone1_combos)
+        result = []
+        for i in range(12):
+            idx = i % n if n else 0
+            zone1 = list(zone1_combos[idx]['combo']) if n else []
+            zone2 = zone2_ordered[idx] if idx < len(zone2_ordered) else None
+            result.append((zone1, zone2))
+        return result
+    except Exception:
+        return [([], None)] * 12

@@ -88,14 +88,102 @@ def get_prediction(zodiac_id: int):
             except Exception:
                 special_candidates = []
 
+        zone2 = int(special_candidates[0]) if special_candidates else None
         return {
             "status": "success",
             "type": "dalotto",
             "issue_number": str(target_period),
             "zone1": list(chosen.combo),
+            "zone2": zone2,
             "special_candidates": special_candidates,
             "score": chosen.score,
         }
 
     except Exception as e:
         return {"status": "error", "message": f"大樂透引擎發生錯誤: {str(e)}"}
+
+
+def get_backtest_detail(limit: int = 15) -> list:
+    """
+    真實 out-of-sample 回測：對最近 limit 期，各自用「該期之前的資料」預測，
+    再與實際開獎比較，回傳每期每組生肖的命中數。
+    邏輯完全對應 V7StructureEngine.backtest()。
+    """
+    df_lotto = _load_csv()
+    df_539 = _load_539_csv()
+
+    total_len = len(df_lotto)
+    if total_len < 30:
+        return []
+
+    start_idx = max(30, total_len - limit)
+    has_special = 'special' in df_lotto.columns
+
+    base_engine = HitOptimizedEngine(df_lotto)
+    engine = V7StructureEngine(base_engine=base_engine, df_lotto=df_lotto, df_539=df_539)
+
+    results = []
+    for target_idx in range(start_idx, total_len):
+        row_data = df_lotto.iloc[target_idx]
+        actual_nums = {
+            int(float(row_data[f'n{i}']))
+            for i in range(1, 7)
+            if pd.notna(row_data.get(f'n{i}'))
+        }
+        actual_sp = (
+            int(float(row_data['special']))
+            if has_special and pd.notna(row_data.get('special'))
+            else None
+        )
+
+        # generate() 使用 target_idx 前的資料做預測 — 同 V7StructureEngine.backtest()
+        _, _, _, combos = engine.generate(target_idx, sets=12)
+
+        zodiac_hits = []
+        for i, c in enumerate(combos):
+            zodiac_id = i + 1
+            hit_main = len(set(c.combo) & actual_nums)
+            has_sp = (actual_sp is not None) and (actual_sp in set(c.combo))
+            hit_count = hit_main + (1 if has_sp else 0)
+            zodiac_hits.append({
+                'zodiac_id': zodiac_id,
+                'hit_count': hit_count,
+                'has_special': has_sp,
+            })
+
+        results.append({
+            'draw_term': str(int(row_data['period'])),
+            'draw_date': str(row_data.get('date', '')),
+            'zodiac_hits': zodiac_hits,
+        })
+
+    return results
+
+
+def get_all_predictions():
+    """一次取得全部 12 組生肖預測，供回測比對用。返回 [(zone1_list, zone2_int_or_None)] * 12。"""
+    try:
+        df_lotto = _load_csv()
+        df_539 = _load_539_csv()
+        if len(df_lotto) < 20:
+            return [([], None)] * 12
+        target_idx = len(df_lotto)
+        base_engine = HitOptimizedEngine(df_lotto)
+        engine = V7StructureEngine(base_engine=base_engine, df_lotto=df_lotto, df_539=df_539)
+        _, _, _, combos = engine.generate(target_idx, sets=12)
+        special = None
+        if hasattr(engine, "special_engine"):
+            try:
+                candidates = engine.special_engine.get_special_predictions(target_idx, top_k=1)
+                special = int(candidates[0]) if candidates else None
+            except Exception:
+                pass
+        n = len(combos)
+        result = []
+        for i in range(12):
+            idx = i % n if n else 0
+            zone1 = list(combos[idx].combo) if n else []
+            result.append((zone1, special))
+        return result
+    except Exception:
+        return [([], None)] * 12
