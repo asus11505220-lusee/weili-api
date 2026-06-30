@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Security, Query
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import json
 import time
 import pandas as pd
 
@@ -12,6 +13,27 @@ import dalotto_engine
 # ── 回測結果記憶體快取（避免每次請求重跑耗時引擎）─────────────────
 _backtest_cache: dict = {}   # key: (lottery_type, limit) → (timestamp, payload)
 _CACHE_TTL = 3600            # 1 小時後過期，重新計算
+
+def _file_cache_path(lottery_type: str, limit: int) -> str:
+    return os.path.join(_BASE_DIR, f'{lottery_type}_backtest_{limit}.json')
+
+def _load_file_cache(lottery_type: str, limit: int) -> dict | None:
+    try:
+        path = _file_cache_path(lottery_type, limit)
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return None
+
+def _save_file_cache(lottery_type: str, limit: int, payload: dict) -> None:
+    try:
+        path = _file_cache_path(lottery_type, limit)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception:
+        pass
 
 app = FastAPI(title="生肖威力今彩大樂透 API (加密防護版)")
 
@@ -61,7 +83,7 @@ _LOTTERY_CFG = {
 }
 
 # 每個彩券類型的命中門檻（含特別號/第二區）
-_LOTTERY_THRESHOLD = {'lotto': 3, 'power': 2, 'daily539': 2}
+_LOTTERY_THRESHOLD = {'lotto': 2, 'power': 2, 'daily539': 2}
 
 # 欄位名稱對應表，涵蓋大樂透、威力彩、今彩539 的各種標頭寫法
 _COL_RENAME = {
@@ -184,21 +206,33 @@ def latest_lotto():
 
 # ── /api/v1/backtest ─────────────────────────────────────────
 @app.get("/api/v1/backtest")
-def backtest(lottery_type: str = Query('lotto', alias='type'), limit: int = Query(15)):
+def backtest(
+    lottery_type: str = Query('lotto', alias='type'),
+    limit: int = Query(15),
+    bust_cache: int = Query(0),
+):
     threshold = _LOTTERY_THRESHOLD.get(lottery_type, 2)
     try:
         cfg = _LOTTERY_CFG.get(lottery_type)
         if not cfg:
             raise ValueError(f"不支援的彩券類型: {lottery_type}")
 
-        # 快取命中：直接回傳已計算結果
+        # 快取命中：直接回傳已計算結果（bust_cache=1 時強制跳過）
         cache_key = (lottery_type, limit)
-        cached = _backtest_cache.get(cache_key)
-        if cached:
-            ts, payload = cached
-            if time.time() - ts < _CACHE_TTL:
-                payload['cached'] = True
-                return payload
+        if not bust_cache:
+            # 1. 記憶體快取
+            cached = _backtest_cache.get(cache_key)
+            if cached:
+                ts, payload = cached
+                if time.time() - ts < _CACHE_TTL:
+                    payload['cached'] = True
+                    return payload
+            # 2. 磁碟快取（GitHub Actions 預計算結果，打包進 image）
+            file_payload = _load_file_cache(lottery_type, limit)
+            if file_payload:
+                file_payload['cached'] = True
+                _backtest_cache[cache_key] = (time.time(), file_payload)
+                return file_payload
 
         _, num_cols, special_col = cfg
         df = _load_df(lottery_type)
@@ -267,6 +301,7 @@ def backtest(lottery_type: str = Query('lotto', alias='type'), limit: int = Quer
             "cached": False,
         }
         _backtest_cache[cache_key] = (time.time(), payload)
+        _save_file_cache(lottery_type, limit, payload)  # 持久化，重啟後仍有效
         return payload
     except Exception as e:
         return {

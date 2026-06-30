@@ -30,10 +30,14 @@ jobs:
       run: |
         python crawler.py
 
-    - name: 5. 將有變動的 CSV 存檔並上傳回 GitHub
+    - name: 5. 預先計算回測快取 JSON
+      run: |
+        python precompute_cache.py
+
+    - name: 6. 將有變動的 CSV 和快取 JSON 存檔並上傳回 GitHub
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git add *.csv
-        git commit -m "🤖 自動更新彩券歷史資料" || echo "今天沒有新資料，無須更新"
+        git add *.csv *_backtest_15.json
+        git commit -m "🤖 自動更新彩券歷史資料與回測快取" || echo "今天沒有新資料，無須更新"
         git push
