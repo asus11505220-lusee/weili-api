@@ -78,24 +78,30 @@ def get_prediction(zodiac_id: int):
         chosen_idx = (zodiac_id - 1) % len(combos)
         chosen = combos[chosen_idx]
 
-        # 特別號預測
-        special_candidates = []
+        # 特別號：每個生肖分配「不同」的候選，避免 12 組都同一個號、並提高涵蓋率
+        special_spread = []
+        special_top = []
         if hasattr(engine, "special_engine"):
             try:
-                special_candidates = engine.special_engine.get_special_predictions(
-                    target_idx, top_k=3
-                )
+                special_spread = engine.special_engine.get_special_spread(target_idx, n_sets=12)
+                special_top = engine.special_engine.get_special_predictions(target_idx, top_k=5)
             except Exception:
-                special_candidates = []
+                special_spread, special_top = [], []
 
-        zone2 = int(special_candidates[0]) if special_candidates else None
+        # 依生肖取該組專屬特別號（12 組各不相同）
+        if special_spread:
+            zone2 = int(special_spread[(zodiac_id - 1) % len(special_spread)])
+        else:
+            zone2 = None
+
         return {
             "status": "success",
             "type": "dalotto",
             "issue_number": str(target_period),
             "zone1": list(chosen.combo),
             "zone2": zone2,
-            "special_candidates": special_candidates,
+            "special_candidates": special_top,   # 全域熱門 Top5（參考用）
+            "special_spread": special_spread,     # 12 組分散清單（本組取第 zodiac_id 個）
             "score": chosen.score,
         }
 
@@ -171,19 +177,20 @@ def get_all_predictions():
         base_engine = HitOptimizedEngine(df_lotto)
         engine = V7StructureEngine(base_engine=base_engine, df_lotto=df_lotto, df_539=df_539)
         _, _, _, combos = engine.generate(target_idx, sets=12)
-        special = None
+        # 12 組各分配不同特別號（分散涵蓋）
+        spread = []
         if hasattr(engine, "special_engine"):
             try:
-                candidates = engine.special_engine.get_special_predictions(target_idx, top_k=1)
-                special = int(candidates[0]) if candidates else None
+                spread = engine.special_engine.get_special_spread(target_idx, n_sets=12)
             except Exception:
-                pass
+                spread = []
         n = len(combos)
         result = []
         for i in range(12):
             idx = i % n if n else 0
             zone1 = list(combos[idx].combo) if n else []
-            result.append((zone1, special))
+            sp_i = int(spread[i % len(spread)]) if spread else None
+            result.append((zone1, sp_i))
         return result
     except Exception:
         return [([], None)] * 12
