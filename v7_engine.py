@@ -35,15 +35,42 @@ class SpecialNumberEngine:
     def __init__(self, df_lotto):
         self.df_lotto = df_lotto
     def get_special_predictions(self, target_idx, lookback=30, top_k=5):
+        # 混合「近15期(重近期)」與「近40期(中期熱度)」兩段窗口，讓排名較不黏著、
+        # 且能回傳較長的候選清單供 12 組分散使用（涵蓋更多特別號）。
+        # 註：特別號本質接近隨機，本清單僅提高涵蓋率，非保證命中。
         if 'special' not in self.df_lotto.columns: return []
-        start_idx = max(0, target_idx - lookback)
-        window = self.df_lotto.iloc[start_idx:target_idx]
-        if window.empty: return []
-        specials = window['special'].dropna().astype(int).tolist()
-        scores = {n: 0.0 for n in range(1, 50)}
-        for i, val in enumerate(specials):
-            scores[val] += 1.0 + (i / len(specials))
-        return [n for n, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_k]]
+        if target_idx <= 0: return []
+
+        def win_scores(win, decay):
+            s0 = max(0, target_idx - win)
+            vals = self.df_lotto.iloc[s0:target_idx]['special'].dropna().astype(int).tolist()
+            m = max(1, len(vals))
+            sc = {}
+            for i, v in enumerate(vals):
+                if 1 <= v <= 49:
+                    sc[v] = sc.get(v, 0.0) + 1.0 + decay * (i / m)
+            return sc
+
+        short = win_scores(15, 1.0)   # 近15期，權重偏近期
+        mid   = win_scores(40, 0.5)   # 近40期，中期熱度
+        scores = {n: short.get(n, 0.0) * 1.2 + mid.get(n, 0.0) * 0.6 for n in range(1, 50)}
+        ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
+        return [n for n, _ in ranked[:top_k]]
+
+    def get_special_spread(self, target_idx, n_sets=12):
+        """回傳 n_sets 個「彼此不同」的特別號候選，供各組分散押注（提高涵蓋率）。
+           前段用熱門排名，不足則以尚未用到的號碼補齊，確保 12 組不重複。"""
+        ranked = self.get_special_predictions(target_idx, top_k=49)
+        if not ranked:
+            return list(range(1, n_sets + 1))
+        spread = ranked[:n_sets]
+        if len(spread) < n_sets:
+            for n in range(1, 50):
+                if n not in spread:
+                    spread.append(n)
+                if len(spread) >= n_sets:
+                    break
+        return spread[:n_sets]
 
 class CrossLotteryEngine:
     def __init__(self, daily539_df):
